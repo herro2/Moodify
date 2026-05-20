@@ -6,20 +6,20 @@
   <title>Moodify — Spotify Mood Analyzer</title>
   <!--
   ╔══════════════════════════════════════════════════════╗
-  ║              MOODIFY — SETUP-INSTRUKTIONER           ║
+  ║              MOODIFY — SETUP INSTRUCTIONS            ║
   ╠══════════════════════════════════════════════════════╣
-  ║  1. Gå till https://developer.spotify.com/dashboard  ║
-  ║  2. Klicka "Create app"                              ║
-  ║  3. Fyll i valfritt namn, välj "Web API"             ║
-  ║  4. Under "Redirect URIs" — lägg till EXAKT:         ║
-  ║       https://DITT-USERNAME.github.io/DITT-REPO/     ║
-  ║  5. Spara → kopiera "Client ID" härifrån             ║
-  ║  6. Byt ut DIN_CLIENT_ID_HÄR nedanför mot ditt ID    ║
-  ║  7. Pusha index.html → aktivera GitHub Pages         ║
+  ║  1. Go to https://developer.spotify.com/dashboard    ║
+  ║  2. Click "Create app"                               ║
+  ║  3. Fill in any name, select "Web API"               ║
+  ║  4. Under "Redirect URIs" add EXACTLY:               ║
+  ║       http://localhost:8080/   (for local testing)   ║
+  ║       OR your GitHub Pages URL                       ║
+  ║  5. Save → copy your "Client ID"                     ║
+  ║  6. Replace YOUR_CLIENT_ID_HERE below                ║
   ║                                                      ║
-  ║  OBS: Appen kör i "Development Mode" — lägg till     ║
-  ║  din Spotify-mejl som testanvändare i dashboarden    ║
-  ║  (Settings → User Management) innan du testar.       ║
+  ║  NOTE: App runs in "Development Mode" — add your     ║
+  ║  Spotify email as a test user in the dashboard       ║
+  ║  (Settings → User Management) before testing.        ║
   ╚══════════════════════════════════════════════════════╝
   -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -52,9 +52,9 @@
     } = Recharts;
 
     /* ═══════════════════════════════════════════════════
-       CONFIG  — byt ut mot ditt Client ID
+       CONFIG — replace with YOUR Spotify Client ID
        ═══════════════════════════════════════════════════ */
-    const CLIENT_ID    = '7eea2c95553c4c87b75e3a1fd8ca1a12';
+    const CLIENT_ID    = 'YOUR_CLIENT_ID_HERE';
     const REDIRECT_URI = window.location.origin + window.location.pathname;
     const SCOPES       = 'user-top-read user-read-recently-played user-read-private user-read-email';
 
@@ -90,16 +90,16 @@
     function spotifyTokenError(d, status) {
       const raw = d.error_description || d.error || '';
       if (status === 403 || raw.toLowerCase().includes('403'))
-        return `403 Forbidden — Redirect URI matchar inte. ` +
-               `Appen använder: "${REDIRECT_URI}". ` +
-               `Kontrollera att exakt denna URI är inlagd under Redirect URIs i ditt Spotify-app.`;
+        return `403 Forbidden — Redirect URI mismatch. ` +
+               `App is using: "${REDIRECT_URI}". ` +
+               `Make sure this exact URI is added under Redirect URIs in your Spotify app dashboard.`;
       if (raw.toLowerCase().includes('invalid_client'))
-        return `Ogiltigt Client ID. Kontrollera att CLIENT_ID i index.html är korrekt.`;
+        return `Invalid Client ID. Check that CLIENT_ID in index.html is correct.`;
       if (raw.toLowerCase().includes('invalid_grant'))
-        return `Koden har redan använts eller löpt ut. Prova att logga in igen.`;
+        return `Code already used or expired. Try logging in again.`;
       if (raw.toLowerCase().includes('not_found') || status === 404)
-        return `Appen hittades inte på Spotify. Kontrollera Client ID.`;
-      return raw || `Fel ${status} från Spotify`;
+        return `App not found on Spotify. Check Client ID.`;
+      return raw || `Error ${status} from Spotify`;
     }
 
     async function exchangeCode(code) {
@@ -121,7 +121,7 @@
 
     async function doRefresh() {
       const rt = localStorage.getItem('mfy_rt');
-      if (!rt) throw new Error('Ingen refresh token');
+      if (!rt) throw new Error('No refresh token');
       const res = await fetch('https://accounts.spotify.com/api/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -156,32 +156,31 @@
       const r = await fetch('https://api.spotify.com/v1' + path, {
         headers: { Authorization: 'Bearer ' + token },
       });
-      if (r.status === 401) { clearAuth(); throw new Error('Session utgången — logga in igen'); }
+      if (r.status === 401) { clearAuth(); throw new Error('Session expired — please log in again'); }
       if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.error?.message || 'HTTP '+r.status); }
       return r.json();
     }
 
     async function loadAll(token, onStatus) {
-      onStatus('Hämtar din profil och topplåtar...');
+      onStatus('Fetching your profile and top tracks...');
       const [me, topTracks, topArtists, recent] = await Promise.all([
         sp(token, '/me'),
         sp(token, '/me/top/tracks?time_range=medium_term&limit=50'),
         sp(token, '/me/top/artists?time_range=medium_term&limit=50'),
         sp(token, '/me/player/recently-played?limit=50').catch(()=>({ items:[] })),
       ]);
-      onStatus('Bearbetar din musikdata...');
+      onStatus('Processing your music data...');
       // NOTE: /audio-features is deprecated for apps created after Nov 2024.
-      // All mood scores are now derived from genres + popularity instead.
+      // All mood scores are derived from genres + popularity instead.
       return { me, topTracks, topArtists, recent };
     }
 
     /* ═══════════════════════════════════════════════════
-       DATA CRUNCHING  (no audio-features needed)
+       DATA CRUNCHING (no audio-features needed)
        ═══════════════════════════════════════════════════ */
 
-    // Genre → mood weights
+    // Genre → mood weights [energy, happiness, danceability, acoustic, complex]
     const GENRE_MOOD = {
-      // [energy, happiness, danceability, acoustic, complex]
       'pop':           [0.65, 0.75, 0.72, 0.25, 0.30],
       'dance':         [0.82, 0.72, 0.88, 0.10, 0.35],
       'edm':           [0.88, 0.65, 0.84, 0.05, 0.50],
@@ -215,7 +214,6 @@
     };
 
     function genreWeights(topArtists) {
-      // Returns averaged [energy, happiness, dance, acoustic, complex] from genres
       const scores = { en:[], ha:[], da:[], ac:[], cx:[] };
       (topArtists.items||[]).forEach(a => {
         (a.genres||[]).forEach(g => {
@@ -235,7 +233,6 @@
 
     function mood(topArtists, ms) {
       const w = genreWeights(topArtists);
-      // Popularity modifier: high mainstream → slightly more happy/dance, less complex
       const popBoost = (ms/100) * 0.08;
       const en = Math.min(1, w.en);
       const ha = Math.min(1, w.ha + popBoost);
@@ -288,7 +285,7 @@
     }
 
     function trendData(items) {
-      const DAYS=["Sön","Mån","Tis","Ons","Tor","Fre","Lör"], days={};
+      const DAYS=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], days={};
       (items||[]).forEach(item=>{
         if(!item.played_at||!item.track) return;
         const d=new Date(item.played_at),
@@ -308,46 +305,45 @@
       return Math.round(it.reduce((s,a)=>s+a.popularity,0)/it.length);
     }
 
-    function personality(m,ms) {
-      const time  = m.energy>65?'dagslyssnare':'nattlyssnare';
-      const type  = m.focus>55?'analytisk':'känslodriven';
-      const main  = ms<35?'undviker mainstream med precision':ms<65?'balanserar mainstream och nisch':'embracar populärkultur';
-      const vibe  = m.energy>70?'hög intensitet':m.chill>65?'lugn och atmosfärisk stil':'varierad dynamik';
-      const depth = m.focus>60?'emotionellt komplex musik':'välproducerad melodisk musik';
-      return `Du är en ${type} ${time} som ${main} och graviterar mot ${depth} med ${vibe}.`;
+    function personality(m, ms) {
+      const time  = m.energy>65 ? 'day listener' : 'night listener';
+      const type  = m.focus>55  ? 'analytical'   : 'emotion-driven';
+      const main  = ms<35 ? 'precisely avoids mainstream' : ms<65 ? 'balances mainstream and niche' : 'embraces popular culture';
+      const vibe  = m.energy>70 ? 'high intensity' : m.chill>65 ? 'calm and atmospheric style' : 'varied dynamics';
+      const depth = m.focus>60  ? 'emotionally complex music' : 'well-produced melodic music';
+      return `You are an ${type} ${time} who ${main} and gravitates toward ${depth} with ${vibe}.`;
     }
 
-    function tags(m,ms) {
+    function tags(m, ms) {
       return [
-        m.energy>70?'Hög energi':m.chill>60?'Chill lyssnare':'Balanserad',
-        ms<35?'Anti-mainstream':ms>70?'Mainstream':'Nisch-nörd',
-        m.focus>60?'Komplex smak':'Melodisk smak',
-        m.happiness>60?'Positiv vibe':'Mörk vibe',
+        m.energy>70 ? 'High Energy' : m.chill>60 ? 'Chill Listener' : 'Balanced',
+        ms<35 ? 'Anti-Mainstream' : ms>70 ? 'Mainstream' : 'Niche Nerd',
+        m.focus>60 ? 'Complex Taste' : 'Melodic Taste',
+        m.happiness>60 ? 'Positive Vibes' : 'Dark Vibes',
       ];
     }
 
-    function funStats(topTracks,topArtists,ms) {
+    function funStats(topTracks, topArtists, ms) {
       const tracks=topTracks.items||[], artists=topArtists.items||[];
-      // Without audio-features: use popularity as proxy for energy/sadness
       const least = tracks.slice().sort((a,b)=>a.popularity-b.popularity)[0];
       const most  = tracks.slice().sort((a,b)=>b.popularity-a.popularity)[0];
       const obs   = artists.slice().sort((a,b)=>a.popularity-b.popularity)[0];
       const hg    = Math.round((1-ms/100)*100);
-      const iq    = Math.min(160,Math.round(80+hg*.55+(100-ms)*.25));
+      const iq    = Math.min(160, Math.round(80+hg*.55+(100-ms)*.25));
       return [
-        { label:"Mainstream %",      value:`${ms}%`,             sub:ms<40?"Indie af":ms<70?"Balanced":"Mainstream enjoyer", color:CY },
-        { label:"Hidden Gem Score",  value:String(hg),           sub:hg>70?"Top underground":"Underground nörd",             color:PU },
-        { label:"Musik-IQ",          value:String(iq),           sub:"Komplexitetsnörd",                                    color:G  },
-        { label:"Minst populär låt", value:least?.name||"—",     sub:least?(least.artists||[{}])[0].name||"":"",            color:PK },
-        { label:"Mest populär låt",  value:most?.name||"—",      sub:most?(most.artists||[{}])[0].name||"":"",              color:OR },
-        { label:"Mest ovanliga",     value:obs?.name||"—",       sub:obs?`${obs.popularity}% popularitet`:"",               color:"#FF4444" },
+        { label:"Mainstream %",      value:`${ms}%`,            sub:ms<40?"Indie af":ms<70?"Balanced":"Mainstream enjoyer", color:CY },
+        { label:"Hidden Gem Score",  value:String(hg),          sub:hg>70?"Top underground":"Underground nerd",            color:PU },
+        { label:"Music IQ",          value:String(iq),          sub:"Complexity nerd",                                     color:G  },
+        { label:"Least Popular",     value:least?.name||"—",    sub:least?(least.artists||[{}])[0]?.name||"":"",           color:PK },
+        { label:"Most Popular",      value:most?.name||"—",     sub:most?(most.artists||[{}])[0]?.name||"":"",             color:OR },
+        { label:"Most Obscure Artist",value:obs?.name||"—",     sub:obs?`${obs.popularity}% popularity`:"",               color:"#FF4444" },
       ];
     }
 
     /* ═══════════════════════════════════════════════════
        DESIGN TOKENS
        ═══════════════════════════════════════════════════ */
-    const G='#1DB954',CY='#00D9F5',PU='#B026FF',PK='#FF2D78',OR='#FF6B35';
+    const G='#1DB954', CY='#00D9F5', PU='#B026FF', PK='#FF2D78', OR='#FF6B35';
     const MOOD_META=[
       {key:'happiness',    label:'Happiness',    color:G,         icon:'☀' },
       {key:'energy',       label:'Energy',       color:OR,        icon:'⚡'},
@@ -362,12 +358,12 @@
        SMALL UI COMPONENTS
        ═══════════════════════════════════════════════════ */
     function Ring({val,color,size=80}) {
-      const r=(size-12)/2, c=2*Math.PI*r;
+      const r=(size-12)/2, circ=2*Math.PI*r;
       return (
         <svg width={size} height={size} style={{transform:'rotate(-90deg)'}}>
           <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={6}/>
           <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={6}
-            strokeDasharray={`${(val/100)*c} ${(1-val/100)*c}`} strokeLinecap="round"
+            strokeDasharray={`${(val/100)*circ} ${(1-val/100)*circ}`} strokeLinecap="round"
             style={{transition:'stroke-dasharray 1.3s cubic-bezier(0.34,1.56,0.64,1)'}}/>
         </svg>
       );
@@ -476,22 +472,22 @@
             </div>
             <div style={{background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.1)',borderRadius:20,padding:'36px 32px',backdropFilter:'blur(20px)',width:'100%',textAlign:'center'}}>
               <div style={{fontSize:42,marginBottom:16}}>🎧</div>
-              <h2 style={{fontSize:22,fontWeight:700,margin:'0 0 10px'}}>Din musik. Ditt mood.</h2>
+              <h2 style={{fontSize:22,fontWeight:700,margin:'0 0 10px'}}>Your music. Your mood.</h2>
               <p style={{color:'rgba(255,255,255,.45)',fontSize:14,lineHeight:1.65,margin:'0 0 28px'}}>
-                Logga in med ditt Spotify-konto för att analysera din musiksmak på riktigt och se din unika musikpersonlighet.
+                Log in with your Spotify account to analyze your music taste and discover your unique music personality.
               </p>
               {error&&(
                 <div style={{background:'rgba(255,50,50,.08)',border:'1px solid rgba(255,80,80,.3)',borderRadius:12,padding:'14px 16px',marginBottom:20,textAlign:'left'}}>
                   <div style={{fontSize:13,color:'#ff8080',lineHeight:1.6,marginBottom:10}}>⚠ {error}</div>
-                  {error.includes('Redirect URI') && (
+                  {(error.includes('Redirect URI') || error.includes('Client ID')) && (
                     <div style={{background:'rgba(0,0,0,.3)',borderRadius:8,padding:'10px 12px'}}>
-                      <div style={{fontSize:11,color:'rgba(255,255,255,.3)',fontFamily:'JetBrains Mono,monospace',marginBottom:6}}>LÄGG TILL EXAKT DENNA URI I SPOTIFY DASHBOARD:</div>
+                      <div style={{fontSize:11,color:'rgba(255,255,255,.3)',fontFamily:'JetBrains Mono,monospace',marginBottom:6}}>ADD THIS EXACT URI IN SPOTIFY DASHBOARD:</div>
                       <div style={{display:'flex',alignItems:'center',gap:8}}>
                         <code style={{fontSize:12,color:CY,fontFamily:'JetBrains Mono,monospace',wordBreak:'break-all',flex:1}}>{REDIRECT_URI}</code>
-                        <button onClick={()=>navigator.clipboard.writeText(REDIRECT_URI)} style={{background:`${CY}22`,border:`1px solid ${CY}44`,color:CY,borderRadius:6,padding:'4px 8px',fontSize:11,cursor:'pointer',whiteSpace:'nowrap',fontFamily:'JetBrains Mono,monospace'}}>Kopiera</button>
+                        <button onClick={()=>navigator.clipboard.writeText(REDIRECT_URI)} style={{background:`${CY}22`,border:`1px solid ${CY}44`,color:CY,borderRadius:6,padding:'4px 8px',fontSize:11,cursor:'pointer',whiteSpace:'nowrap',fontFamily:'JetBrains Mono,monospace'}}>Copy</button>
                       </div>
                       <div style={{fontSize:11,color:'rgba(255,255,255,.3)',marginTop:8,lineHeight:1.5}}>
-                        Gå till <span style={{color:G}}>developer.spotify.com/dashboard</span> → din app → Edit → Redirect URIs → klistra in ovan → Save
+                        Go to <span style={{color:G}}>developer.spotify.com/dashboard</span> → your app → Edit → Redirect URIs → paste above → Save
                       </div>
                     </div>
                   )}
@@ -507,13 +503,13 @@
                   ? <span style={{display:'inline-block',animation:'spin 1s linear infinite',fontSize:20}}>⟳</span>
                   : <><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
-                    </svg>Logga in med Spotify</>}
+                    </svg>Log in with Spotify</>}
               </button>
               <div style={{marginTop:14,background:'rgba(0,0,0,.25)',borderRadius:8,padding:'10px 12px',textAlign:'left'}}>
-                <div style={{fontSize:10,color:'rgba(255,255,255,.25)',fontFamily:'JetBrains Mono,monospace',marginBottom:4}}>AKTIV REDIRECT URI (kopiera in i Spotify Dashboard)</div>
+                <div style={{fontSize:10,color:'rgba(255,255,255,.25)',fontFamily:'JetBrains Mono,monospace',marginBottom:4}}>ACTIVE REDIRECT URI (add this to Spotify Dashboard)</div>
                 <div style={{display:'flex',alignItems:'center',gap:6}}>
                   <code style={{fontSize:11,color:'rgba(255,255,255,.45)',fontFamily:'JetBrains Mono,monospace',wordBreak:'break-all',flex:1}}>{REDIRECT_URI}</code>
-                  <button onClick={()=>navigator.clipboard.writeText(REDIRECT_URI)} style={{background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.12)',color:'rgba(255,255,255,.4)',borderRadius:5,padding:'3px 7px',fontSize:10,cursor:'pointer',whiteSpace:'nowrap',fontFamily:'JetBrains Mono,monospace'}}>Kopiera</button>
+                  <button onClick={()=>navigator.clipboard.writeText(REDIRECT_URI)} style={{background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.12)',color:'rgba(255,255,255,.4)',borderRadius:5,padding:'3px 7px',fontSize:10,cursor:'pointer',whiteSpace:'nowrap',fontFamily:'JetBrains Mono,monospace'}}>Copy</button>
                 </div>
               </div>
             </div>
@@ -552,8 +548,9 @@
 
       const rows = (topTracks.items||[]).slice(0,15).map(t=>({...t}));
       const COLS = [G,PU,CY,OR,PK];
-      const name = me.display_name||me.id||"?";
-      const name = me.display_name||me.id||'?';
+
+      // FIX: single declaration of displayName (was duplicated, causing syntax error)
+      const displayName = me.display_name || me.id || '?';
 
       return (
         <div style={{minHeight:'100vh',background:'#05040A',color:'white',fontFamily:'Syne,sans-serif'}}>
@@ -585,8 +582,8 @@
               <div style={{display:'flex',alignItems:'center',gap:10}}>
                 {me.images?.[0]?.url
                   ? <img src={me.images[0].url} style={{width:32,height:32,borderRadius:'50%',objectFit:'cover'}} alt=""/>
-                  : <div style={{width:32,height:32,borderRadius:'50%',background:`linear-gradient(135deg,${G},${CY})`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:800,color:'#000'}}>{name[0].toUpperCase()}</div>}
-                <span style={{fontSize:13,color:'rgba(255,255,255,.55)',maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name}</span>
+                  : <div style={{width:32,height:32,borderRadius:'50%',background:`linear-gradient(135deg,${G},${CY})`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:800,color:'#000'}}>{displayName[0].toUpperCase()}</div>}
+                <span style={{fontSize:13,color:'rgba(255,255,255,.55)',maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{displayName}</span>
                 <button onClick={onLogout} style={{background:'none',border:'1px solid rgba(255,255,255,.12)',color:'rgba(255,255,255,.4)',borderRadius:8,padding:'5px 11px',fontSize:12,cursor:'pointer',fontFamily:'JetBrains Mono,monospace'}}>logout</button>
               </div>
             </nav>
@@ -595,14 +592,14 @@
             {tab==='overview'&&<>
               <div className="fi" style={{background:'linear-gradient(135deg,rgba(176,38,255,.13),rgba(0,217,245,.06))',border:'1px solid rgba(176,38,255,.28)',borderRadius:20,padding:'28px 32px',marginBottom:32,backdropFilter:'blur(12px)',position:'relative',overflow:'hidden'}}>
                 <div style={{position:'absolute',top:-10,right:-10,fontSize:130,opacity:.04,lineHeight:1}}>🧠</div>
-                <div style={{fontSize:11,color:PU,fontFamily:'JetBrains Mono,monospace',letterSpacing:'.12em',marginBottom:10}}>AI MUSIKPERSONLIGHET</div>
+                <div style={{fontSize:11,color:PU,fontFamily:'JetBrains Mono,monospace',letterSpacing:'.12em',marginBottom:10}}>AI MUSIC PERSONALITY</div>
                 <p style={{fontSize:17,lineHeight:1.7,color:'rgba(255,255,255,.85)',margin:0,maxWidth:680}}>{pText}</p>
                 <div style={{display:'flex',gap:8,marginTop:16,flexWrap:'wrap'}}>
                   {tgs.map(t=><span key={t} style={{background:'rgba(176,38,255,.12)',border:'1px solid rgba(176,38,255,.22)',color:`${PU}CC`,padding:'4px 12px',borderRadius:20,fontSize:12,fontFamily:'JetBrains Mono,monospace'}}>{t}</span>)}
                 </div>
               </div>
 
-              <Section title={`Mood-profil · Genre-baserad analys`}>
+              <Section title="Mood Profile · Genre-based analysis">
                 <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(110px,1fr))',gap:12}}>
                   {MOOD_META.map((m,i)=><MoodCard key={m.key} item={m} idx={i} value={moodObj[m.key]}/>)}
                 </div>
@@ -610,7 +607,7 @@
 
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20,marginBottom:32}}>
                 <GlassCard>
-                  <div style={{fontSize:11,color:'rgba(255,255,255,.35)',fontFamily:'JetBrains Mono,monospace',letterSpacing:'.1em',marginBottom:12}}>MUSIKPERSONLIGHET RADAR</div>
+                  <div style={{fontSize:11,color:'rgba(255,255,255,.35)',fontFamily:'JetBrains Mono,monospace',letterSpacing:'.1em',marginBottom:12}}>MUSIC PERSONALITY RADAR</div>
                   <ResponsiveContainer width="100%" height={220}>
                     <RadarChart data={radar}>
                       <PolarGrid stroke="rgba(255,255,255,.07)"/>
@@ -621,7 +618,7 @@
                 </GlassCard>
 
                 <GlassCard>
-                  <div style={{fontSize:11,color:'rgba(255,255,255,.35)',fontFamily:'JetBrains Mono,monospace',letterSpacing:'.1em',marginBottom:12}}>GENRE-FÖRDELNING</div>
+                  <div style={{fontSize:11,color:'rgba(255,255,255,.35)',fontFamily:'JetBrains Mono,monospace',letterSpacing:'.1em',marginBottom:12}}>GENRE DISTRIBUTION</div>
                   {genres.length
                     ? <div style={{display:'flex',gap:12,alignItems:'center'}}>
                         <PieChart width={140} height={140}>
@@ -639,11 +636,11 @@
                           ))}
                         </div>
                       </div>
-                    : <div style={{color:'rgba(255,255,255,.3)',fontSize:13,paddingTop:20}}>Inte tillräckligt med genredata</div>}
+                    : <div style={{color:'rgba(255,255,255,.3)',fontSize:13,paddingTop:20}}>Not enough genre data</div>}
                 </GlassCard>
               </div>
 
-              {trend.length>1&&<Section title="Mood trend · senaste dagarna">
+              {trend.length>1&&<Section title="Mood trend · recent days">
                 <GlassCard>
                   <div style={{display:'flex',gap:20,marginBottom:16}}>
                     {[{l:'Energy',c:OR},{l:'Happiness',c:G}].map(s=>(
@@ -676,7 +673,7 @@
             </>}
 
             {/* TRACKS */}
-            {tab==='tracks'&&<Section title={`Top tracks · ${topTracks.items?.length||0} låtar`}>
+            {tab==='tracks'&&<Section title={`Top tracks · ${topTracks.items?.length||0} songs`}>
               <div style={{display:'flex',flexDirection:'column',gap:10}}>
                 {rows.map((t,i)=>{
                   const en=Math.round(40+(t.popularity||50)*.55);
@@ -744,15 +741,15 @@
             {tab==='social'&&<Section title="Social Match">
               <GlassCard style={{textAlign:'center',marginBottom:20}}>
                 <div style={{fontSize:60,marginBottom:16}}>🎭</div>
-                <div style={{fontSize:13,color:'rgba(255,255,255,.35)',fontFamily:'JetBrains Mono,monospace',letterSpacing:'.1em',marginBottom:20}}>DITT NÄRMASTE MATCH</div>
+                <div style={{fontSize:13,color:'rgba(255,255,255,.35)',fontFamily:'JetBrains Mono,monospace',letterSpacing:'.1em',marginBottom:20}}>YOUR CLOSEST MATCH</div>
                 <div style={{display:'inline-block',background:`linear-gradient(135deg,${PU}22,${CY}22)`,border:`1px solid ${PU}44`,borderRadius:16,padding:'16px 32px',marginBottom:20}}>
                   <div style={{fontSize:42,fontWeight:800}}>{moodObj.energy>70&&ms<50?'87%':moodObj.chill>60?'82%':'79%'}</div>
                   <div style={{fontSize:15,color:CY,fontFamily:'JetBrains Mono,monospace',marginTop:4}}>
-                    {moodObj.energy>70?'Intensitets-lyssnare':moodObj.chill>60?'Ambient-utforskare':'Indie-nörd'}
+                    {moodObj.energy>70?'Intensity Listener':moodObj.chill>60?'Ambient Explorer':'Indie Nerd'}
                   </div>
                 </div>
                 <p style={{color:'rgba(255,255,255,.5)',fontSize:14,lineHeight:1.7,maxWidth:500,margin:'0 auto'}}>
-                  Baserat på din musikprofil — {moodObj.happiness}% happiness, {moodObj.energy}% energy, {ms}% mainstream.
+                  Based on your music profile — {moodObj.happiness}% happiness, {moodObj.energy}% energy, {ms}% mainstream.
                 </p>
               </GlassCard>
               <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14}}>
@@ -782,7 +779,7 @@
       const [phase,  setPhase]  = useState('init');
       const [data,   setData]   = useState(null);
       const [error,  setError]  = useState('');
-      const [status, setStatus] = useState('Laddar...');
+      const [status, setStatus] = useState('Loading...');
       const [ll,     setLL]     = useState(false);
 
       const logout = () => { clearAuth(); setData(null); setError(''); setPhase('login'); };
@@ -796,8 +793,8 @@
       };
 
       const handleLogin = async () => {
-        if (CLIENT_ID === 'DIN_CLIENT_ID_HÄR') {
-          setError('Öppna index.html och byt ut DIN_CLIENT_ID_HÄR mot ditt Spotify Client ID.');
+        if (CLIENT_ID === 'YOUR_CLIENT_ID_HERE') {
+          setError('Open index.html and replace YOUR_CLIENT_ID_HERE with your Spotify Client ID from developer.spotify.com/dashboard');
           return;
         }
         setLL(true);
@@ -807,10 +804,10 @@
       useEffect(()=>{
         const p=new URLSearchParams(window.location.search);
         const code=p.get('code'), err=p.get('error');
-        if(err){ window.history.replaceState({},'',window.location.pathname); setError('Spotify nekade: '+err); setPhase('login'); return; }
+        if(err){ window.history.replaceState({},'',window.location.pathname); setError('Spotify denied: '+err); setPhase('login'); return; }
         if(code){
           window.history.replaceState({},'',window.location.pathname);
-          setPhase('loading'); setStatus('Byter kod mot token...');
+          setPhase('loading'); setStatus('Exchanging code for token...');
           exchangeCode(code).then(t=>fetch2(t)).catch(e=>{setError(e.message);setPhase('login');});
           return;
         }
