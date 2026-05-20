@@ -54,7 +54,7 @@
     /* ═══════════════════════════════════════════════════
        CONFIG  — byt ut mot ditt Client ID
        ═══════════════════════════════════════════════════ */
-    const CLIENT_ID    = '7eea2c95553c4c87b75e3a1fd8ca1a12';
+    const CLIENT_ID    = 'DIN_CLIENT_ID_HÄR';
     const REDIRECT_URI = window.location.origin + window.location.pathname;
     const SCOPES       = 'user-top-read user-read-recently-played user-read-private user-read-email';
 
@@ -87,6 +87,21 @@
       window.location.href = 'https://accounts.spotify.com/authorize?' + p;
     }
 
+    function spotifyTokenError(d, status) {
+      const raw = d.error_description || d.error || '';
+      if (status === 403 || raw.toLowerCase().includes('403'))
+        return `403 Forbidden — Redirect URI matchar inte. ` +
+               `Appen använder: "${REDIRECT_URI}". ` +
+               `Kontrollera att exakt denna URI är inlagd under Redirect URIs i ditt Spotify-app.`;
+      if (raw.toLowerCase().includes('invalid_client'))
+        return `Ogiltigt Client ID. Kontrollera att CLIENT_ID i index.html är korrekt.`;
+      if (raw.toLowerCase().includes('invalid_grant'))
+        return `Koden har redan använts eller löpt ut. Prova att logga in igen.`;
+      if (raw.toLowerCase().includes('not_found') || status === 404)
+        return `Appen hittades inte på Spotify. Kontrollera Client ID.`;
+      return raw || `Fel ${status} från Spotify`;
+    }
+
     async function exchangeCode(code) {
       const res = await fetch('https://accounts.spotify.com/api/token', {
         method: 'POST',
@@ -97,7 +112,7 @@
         }),
       });
       const d = await res.json();
-      if (!d.access_token) throw new Error(d.error_description || 'Token exchange misslyckades');
+      if (!d.access_token) throw new Error(spotifyTokenError(d, res.status));
       saveTokens(d);
       localStorage.removeItem('mfy_v');
       window.history.replaceState({}, '', window.location.pathname);
@@ -113,7 +128,7 @@
         body: new URLSearchParams({ client_id: CLIENT_ID, grant_type: 'refresh_token', refresh_token: rt }),
       });
       const d = await res.json();
-      if (!d.access_token) throw new Error('Refresh misslyckades');
+      if (!d.access_token) throw new Error(spotifyTokenError(d, res.status));
       saveTokens(d);
       return d.access_token;
     }
@@ -416,7 +431,23 @@
               <p style={{color:'rgba(255,255,255,.45)',fontSize:14,lineHeight:1.65,margin:'0 0 28px'}}>
                 Logga in med ditt Spotify-konto för att analysera din musiksmak på riktigt och se din unika musikpersonlighet.
               </p>
-              {error&&<div style={{background:'rgba(255,50,50,.1)',border:'1px solid rgba(255,80,80,.3)',borderRadius:10,padding:'11px 14px',marginBottom:20,fontSize:13,color:'#ff8080',textAlign:'left',lineHeight:1.5}}>⚠ {error}</div>}
+              {error&&(
+                <div style={{background:'rgba(255,50,50,.08)',border:'1px solid rgba(255,80,80,.3)',borderRadius:12,padding:'14px 16px',marginBottom:20,textAlign:'left'}}>
+                  <div style={{fontSize:13,color:'#ff8080',lineHeight:1.6,marginBottom:10}}>⚠ {error}</div>
+                  {error.includes('Redirect URI') && (
+                    <div style={{background:'rgba(0,0,0,.3)',borderRadius:8,padding:'10px 12px'}}>
+                      <div style={{fontSize:11,color:'rgba(255,255,255,.3)',fontFamily:'JetBrains Mono,monospace',marginBottom:6}}>LÄGG TILL EXAKT DENNA URI I SPOTIFY DASHBOARD:</div>
+                      <div style={{display:'flex',alignItems:'center',gap:8}}>
+                        <code style={{fontSize:12,color:CY,fontFamily:'JetBrains Mono,monospace',wordBreak:'break-all',flex:1}}>{REDIRECT_URI}</code>
+                        <button onClick={()=>navigator.clipboard.writeText(REDIRECT_URI)} style={{background:`${CY}22`,border:`1px solid ${CY}44`,color:CY,borderRadius:6,padding:'4px 8px',fontSize:11,cursor:'pointer',whiteSpace:'nowrap',fontFamily:'JetBrains Mono,monospace'}}>Kopiera</button>
+                      </div>
+                      <div style={{fontSize:11,color:'rgba(255,255,255,.3)',marginTop:8,lineHeight:1.5}}>
+                        Gå till <span style={{color:G}}>developer.spotify.com/dashboard</span> → din app → Edit → Redirect URIs → klistra in ovan → Save
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
               <button onClick={onLogin} disabled={loading} style={{
                 width:'100%',padding:'14px 0',borderRadius:12,border:'none',
                 background:loading?'rgba(29,185,84,.25)':G, color:loading?G:'#000',
@@ -429,9 +460,13 @@
                       <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
                     </svg>Logga in med Spotify</>}
               </button>
-              <p style={{color:'rgba(255,255,255,.2)',fontSize:12,marginTop:14,fontFamily:'JetBrains Mono,monospace'}}>
-                PKCE OAuth — ingen server, din data lämnar inte webbläsaren
-              </p>
+              <div style={{marginTop:14,background:'rgba(0,0,0,.25)',borderRadius:8,padding:'10px 12px',textAlign:'left'}}>
+                <div style={{fontSize:10,color:'rgba(255,255,255,.25)',fontFamily:'JetBrains Mono,monospace',marginBottom:4}}>AKTIV REDIRECT URI (kopiera in i Spotify Dashboard)</div>
+                <div style={{display:'flex',alignItems:'center',gap:6}}>
+                  <code style={{fontSize:11,color:'rgba(255,255,255,.45)',fontFamily:'JetBrains Mono,monospace',wordBreak:'break-all',flex:1}}>{REDIRECT_URI}</code>
+                  <button onClick={()=>navigator.clipboard.writeText(REDIRECT_URI)} style={{background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.12)',color:'rgba(255,255,255,.4)',borderRadius:5,padding:'3px 7px',fontSize:10,cursor:'pointer',whiteSpace:'nowrap',fontFamily:'JetBrains Mono,monospace'}}>Kopiera</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
