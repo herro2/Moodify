@@ -169,49 +169,98 @@
         sp(token, '/me/top/artists?time_range=medium_term&limit=50'),
         sp(token, '/me/player/recently-played?limit=50').catch(()=>({ items:[] })),
       ]);
-      onStatus('Analyserar ljudegenskaper...');
-      const tIds = (topTracks.items||[]).map(t=>t.id).filter(Boolean);
-      const rIds = [...new Set((recent.items||[]).map(i=>i.track?.id).filter(Boolean))];
-      const [tf, rf] = await Promise.all([
-        tIds.length ? sp(token, '/audio-features?ids='+tIds.join(',')) : { audio_features:[] },
-        rIds.length ? sp(token, '/audio-features?ids='+rIds.slice(0,100).join(',')) : { audio_features:[] },
-      ]);
-      return { me, topTracks, topArtists, recent, tf, rf };
+      onStatus('Bearbetar din musikdata...');
+      // NOTE: /audio-features is deprecated for apps created after Nov 2024.
+      // All mood scores are now derived from genres + popularity instead.
+      return { me, topTracks, topArtists, recent };
     }
 
     /* ═══════════════════════════════════════════════════
-       DATA CRUNCHING
+       DATA CRUNCHING  (no audio-features needed)
        ═══════════════════════════════════════════════════ */
-    const avg = (a,k) => { const v=a.filter(x=>x&&x[k]!=null); return v.length?v.reduce((s,x)=>s+x[k],0)/v.length:0; };
 
-    function mood(feats) {
-      const f = feats.filter(Boolean);
-      if (!f.length) return Object.fromEntries(['happiness','energy','sadness','focus','danceability','aggression','chill'].map(k=>[k,50]));
-      const en=avg(f,'energy'), va=avg(f,'valence'), da=avg(f,'danceability'),
-            ac=avg(f,'acousticness'), ins=avg(f,'instrumentalness'), sp2=avg(f,'speechiness'),
-            ln=Math.min(1,Math.max(0,(avg(f,'loudness')+60)/60));
+    // Genre → mood weights
+    const GENRE_MOOD = {
+      // [energy, happiness, danceability, acoustic, complex]
+      'pop':           [0.65, 0.75, 0.72, 0.25, 0.30],
+      'dance':         [0.82, 0.72, 0.88, 0.10, 0.35],
+      'edm':           [0.88, 0.65, 0.84, 0.05, 0.50],
+      'electronic':    [0.78, 0.58, 0.75, 0.08, 0.60],
+      'house':         [0.80, 0.68, 0.85, 0.08, 0.45],
+      'techno':        [0.85, 0.45, 0.80, 0.05, 0.65],
+      'hip hop':       [0.72, 0.62, 0.82, 0.12, 0.55],
+      'rap':           [0.74, 0.58, 0.80, 0.10, 0.60],
+      'trap':          [0.76, 0.50, 0.78, 0.08, 0.55],
+      'r&b':           [0.58, 0.68, 0.72, 0.28, 0.50],
+      'rock':          [0.78, 0.52, 0.55, 0.22, 0.55],
+      'metal':         [0.90, 0.35, 0.45, 0.08, 0.72],
+      'punk':          [0.88, 0.50, 0.60, 0.15, 0.48],
+      'indie':         [0.55, 0.58, 0.58, 0.48, 0.62],
+      'alternative':   [0.60, 0.52, 0.55, 0.38, 0.60],
+      'post-rock':     [0.60, 0.42, 0.35, 0.40, 0.80],
+      'math rock':     [0.65, 0.48, 0.40, 0.35, 0.88],
+      'ambient':       [0.22, 0.48, 0.28, 0.68, 0.72],
+      'classical':     [0.30, 0.62, 0.28, 0.88, 0.82],
+      'jazz':          [0.42, 0.65, 0.58, 0.72, 0.85],
+      'blues':         [0.48, 0.52, 0.55, 0.65, 0.68],
+      'folk':          [0.38, 0.62, 0.48, 0.80, 0.58],
+      'country':       [0.52, 0.65, 0.58, 0.72, 0.42],
+      'soul':          [0.52, 0.70, 0.65, 0.55, 0.60],
+      'funk':          [0.72, 0.72, 0.82, 0.30, 0.65],
+      'latin':         [0.72, 0.75, 0.85, 0.30, 0.45],
+      'reggae':        [0.52, 0.72, 0.75, 0.55, 0.42],
+      'lo-fi':         [0.28, 0.55, 0.55, 0.65, 0.58],
+      'experimental':  [0.55, 0.38, 0.42, 0.40, 0.90],
+      'shoegaze':      [0.55, 0.42, 0.38, 0.45, 0.75],
+    };
+
+    function genreWeights(topArtists) {
+      // Returns averaged [energy, happiness, dance, acoustic, complex] from genres
+      const scores = { en:[], ha:[], da:[], ac:[], cx:[] };
+      (topArtists.items||[]).forEach(a => {
+        (a.genres||[]).forEach(g => {
+          const gl = g.toLowerCase();
+          for (const [kw, w] of Object.entries(GENRE_MOOD)) {
+            if (gl.includes(kw)) {
+              scores.en.push(w[0]); scores.ha.push(w[1]);
+              scores.da.push(w[2]); scores.ac.push(w[3]); scores.cx.push(w[4]);
+              break;
+            }
+          }
+        });
+      });
+      const m = arr => arr.length ? arr.reduce((s,v)=>s+v,0)/arr.length : 0.5;
+      return { en:m(scores.en), ha:m(scores.ha), da:m(scores.da), ac:m(scores.ac), cx:m(scores.cx) };
+    }
+
+    function mood(topArtists, ms) {
+      const w = genreWeights(topArtists);
+      // Popularity modifier: high mainstream → slightly more happy/dance, less complex
+      const popBoost = (ms/100) * 0.08;
+      const en = Math.min(1, w.en);
+      const ha = Math.min(1, w.ha + popBoost);
+      const da = Math.min(1, w.da + popBoost * 0.5);
+      const ac = w.ac;
+      const cx = Math.max(0, w.cx - popBoost);
       return {
-        happiness:    Math.round(va*100),
-        energy:       Math.round(en*100),
-        sadness:      Math.round(((1-va)*.55+(1-en)*.45)*100),
-        focus:        Math.round((ins*.55+(1-sp2)*.45)*100),
-        danceability: Math.round(da*100),
-        aggression:   Math.round((en*.4+ln*.35+(1-va)*.25)*100),
-        chill:        Math.round((ac*.45+(1-en)*.35+va*.2)*100),
+        happiness:    Math.round(ha * 100),
+        energy:       Math.round(en * 100),
+        sadness:      Math.round(((1-ha)*.6 + (1-en)*.4) * 100),
+        focus:        Math.round((cx*.55 + ac*.25 + (1-da)*.2) * 100),
+        danceability: Math.round(da * 100),
+        aggression:   Math.round((en*.45 + (1-ha)*.35 + (1-ac)*.2) * 100),
+        chill:        Math.round((ac*.45 + (1-en)*.35 + ha*.2) * 100),
       };
     }
 
-    function radarData(feats, ms) {
-      const f=feats.filter(Boolean); if(!f.length) return [];
-      const en=avg(f,'energy'),va=avg(f,'valence'),ac=avg(f,'acousticness'),
-            ins=avg(f,'instrumentalness'),da=avg(f,'danceability'),
-            ln=Math.min(1,Math.max(0,(avg(f,'loudness')+60)/60));
+    function radarData(topArtists, ms) {
+      const w = genreWeights(topArtists);
       return [
-        { s:'Melodic',    A:Math.round(((1-en)*.5+va*.5)*100) },
-        { s:'Intense',    A:Math.round((en*.5+ln*.5)*100) },
-        { s:'Electronic', A:Math.round((1-ac)*100) },
-        { s:'Acoustic',   A:Math.round(ac*100) },
-        { s:'Complex',    A:Math.round((ins*.55+da*.45)*100) },
+        { s:'Melodic',    A:Math.round(((1-w.en)*.5 + w.ha*.5) * 100) },
+        { s:'Intense',    A:Math.round((w.en*.6 + (1-w.ac)*.4) * 100) },
+        { s:'Electronic', A:Math.round((1-w.ac) * 100) },
+        { s:'Acoustic',   A:Math.round(w.ac * 100) },
+        { s:'Complex',    A:Math.round(w.cx * 100) },
         { s:'Mainstream', A:Math.round(ms) },
       ];
     }
@@ -238,19 +287,20 @@
         .map(([n,v],i)=>({ name:n, value:Math.round((v/tot)*100), color:[PU,CY,G,OR,PK,'#888'][i] }));
     }
 
-    function trendData(items, rf) {
-      const fm={};
-      (rf.audio_features||[]).forEach(f=>{ if(f) fm[f.id]=f; });
-      const DAYS=['Sön','Mån','Tis','Ons','Tor','Fre','Lör'], days={};
+    function trendData(items) {
+      const DAYS=["Sön","Mån","Tis","Ons","Tor","Fre","Lör"], days={};
       (items||[]).forEach(item=>{
         if(!item.played_at||!item.track) return;
         const d=new Date(item.played_at),
-              k=`${d.getFullYear()}-${String(d.getMonth()).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-        if(!days[k]) days[k]={ label:DAYS[d.getDay()], feats:[] };
-        const f=fm[item.track.id]; if(f) days[k].feats.push(f);
+              k=`${d.getFullYear()}-${String(d.getMonth()).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+        if(!days[k]) days[k]={ label:DAYS[d.getDay()], pops:[] };
+        days[k].pops.push(item.track.popularity||50);
       });
       return Object.entries(days).sort(([a],[b])=>a.localeCompare(b)).slice(-7)
-        .map(([,v])=>({ day:v.label, energy:Math.round(avg(v.feats,'energy')*100), happiness:Math.round(avg(v.feats,'valence')*100) }));
+        .map(([,v])=>{
+          const ap=v.pops.length?v.pops.reduce((s,p)=>s+p,0)/v.pops.length:50;
+          return { day:v.label, energy:Math.round(40+ap*.55), happiness:Math.round(35+ap*.6) };
+        });
     }
 
     function mainstream(ta) {
@@ -276,22 +326,21 @@
       ];
     }
 
-    function funStats(topTracks,topArtists,tf,ms) {
-      const feats=(tf.audio_features||[]).filter(Boolean);
+    function funStats(topTracks,topArtists,ms) {
       const tracks=topTracks.items||[], artists=topArtists.items||[];
-      const wt=feats.map((f,i)=>({f,t:tracks[i]})).filter(x=>x.f&&x.t);
-      const sad=wt.slice().sort((a,b)=>a.f.valence-b.f.valence)[0];
-      const nrg=wt.slice().sort((a,b)=>b.f.energy-a.f.energy)[0];
-      const obs=artists.slice().sort((a,b)=>a.popularity-b.popularity)[0];
-      const hg=Math.round((1-ms/100)*100);
-      const iq=Math.min(160,Math.round(80+hg*.55+(100-ms)*.25));
+      // Without audio-features: use popularity as proxy for energy/sadness
+      const least = tracks.slice().sort((a,b)=>a.popularity-b.popularity)[0];
+      const most  = tracks.slice().sort((a,b)=>b.popularity-a.popularity)[0];
+      const obs   = artists.slice().sort((a,b)=>a.popularity-b.popularity)[0];
+      const hg    = Math.round((1-ms/100)*100);
+      const iq    = Math.min(160,Math.round(80+hg*.55+(100-ms)*.25));
       return [
-        { label:'Mainstream %',      value:`${ms}%`,          sub:ms<40?'Indie af':ms<70?'Balanced':'Mainstream enjoyer', color:CY },
-        { label:'Hidden Gem Score',  value:String(hg),        sub:hg>70?'Top underground':'Underground nörd',             color:PU },
-        { label:'Musik-IQ',          value:String(iq),        sub:'Komplexitetsnörd',                                    color:G  },
-        { label:'Mest deprimerande', value:sad?.t?.name||'—', sub:sad?sad.t.artists[0].name:'',                          color:PK },
-        { label:'Mest energiska',    value:nrg?.t?.name||'—', sub:nrg?nrg.t.artists[0].name:'',                          color:OR },
-        { label:'Mest ovanliga',     value:obs?.name||'—',    sub:obs?`${obs.popularity}% popularitet`:'',               color:'#FF4444' },
+        { label:"Mainstream %",      value:`${ms}%`,             sub:ms<40?"Indie af":ms<70?"Balanced":"Mainstream enjoyer", color:CY },
+        { label:"Hidden Gem Score",  value:String(hg),           sub:hg>70?"Top underground":"Underground nörd",             color:PU },
+        { label:"Musik-IQ",          value:String(iq),           sub:"Komplexitetsnörd",                                    color:G  },
+        { label:"Minst populär låt", value:least?.name||"—",     sub:least?(least.artists||[{}])[0].name||"":"",            color:PK },
+        { label:"Mest populär låt",  value:most?.name||"—",      sub:most?(most.artists||[{}])[0].name||"":"",              color:OR },
+        { label:"Mest ovanliga",     value:obs?.name||"—",       sub:obs?`${obs.popularity}% popularitet`:"",               color:"#FF4444" },
       ];
     }
 
@@ -490,20 +539,20 @@
        ═══════════════════════════════════════════════════ */
     function Dashboard({data,onLogout}) {
       const [tab,setTab]=useState('overview');
-      const {me,topTracks,topArtists,recent,tf,rf}=data;
+      const {me,topTracks,topArtists,recent}=data;
 
-      const feats    = (tf.audio_features||[]).filter(Boolean);
       const ms       = mainstream(topArtists);
-      const moodObj  = mood(feats);
-      const radar    = radarData(feats,ms);
+      const moodObj  = mood(topArtists, ms);
+      const radar    = radarData(topArtists, ms);
       const genres   = genreData(topArtists);
-      const trend    = trendData(recent.items||[],rf);
-      const stats    = funStats(topTracks,topArtists,tf,ms);
+      const trend    = trendData(recent.items||[]);
+      const stats    = funStats(topTracks,topArtists,ms);
       const pText    = personality(moodObj,ms);
       const tgs      = tags(moodObj,ms);
 
-      const rows = (topTracks.items||[]).slice(0,15).map((t,i)=>({...t,feat:(tf.audio_features||[])[i]||null}));
+      const rows = (topTracks.items||[]).slice(0,15).map(t=>({...t}));
       const COLS = [G,PU,CY,OR,PK];
+      const name = me.display_name||me.id||"?";
       const name = me.display_name||me.id||'?';
 
       return (
@@ -553,7 +602,7 @@
                 </div>
               </div>
 
-              <Section title={`Mood-profil · ${feats.length} låtar analyserade`}>
+              <Section title={`Mood-profil · Genre-baserad analys`}>
                 <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(110px,1fr))',gap:12}}>
                   {MOOD_META.map((m,i)=><MoodCard key={m.key} item={m} idx={i} value={moodObj[m.key]}/>)}
                 </div>
@@ -630,8 +679,8 @@
             {tab==='tracks'&&<Section title={`Top tracks · ${topTracks.items?.length||0} låtar`}>
               <div style={{display:'flex',flexDirection:'column',gap:10}}>
                 {rows.map((t,i)=>{
-                  const en=t.feat?Math.round(t.feat.energy*100):0;
-                  const va=t.feat?t.feat.valence:.5;
+                  const en=Math.round(40+(t.popularity||50)*.55);
+                  const va=(t.popularity||50)/100;
                   const ms2=t.duration_ms||0;
                   const dur=ms2?`${Math.floor(ms2/60000)}:${String(Math.floor((ms2%60000)/1000)).padStart(2,'0')}`:'—';
                   return (
