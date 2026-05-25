@@ -3,35 +3,57 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Moodify — Spotify Mood Analyzer</title>
+  <title>Moodify</title>
+
   <!--
-  ╔══════════════════════════════════════════════════════╗
-  ║              MOODIFY — SETUP INSTRUCTIONS            ║
-  ╠══════════════════════════════════════════════════════╣
-  ║  1. Go to https://developer.spotify.com/dashboard    ║
-  ║  2. Click "Create app"                               ║
-  ║  3. Fill in any name, select "Web API"               ║
-  ║  4. Under "Redirect URIs" add EXACTLY:               ║
-  ║       http://localhost:8080/   (for local testing)   ║
-  ║       OR your GitHub Pages URL                       ║
-  ║  5. Save → copy your "Client ID"                     ║
-  ║  6. Replace YOUR_CLIENT_ID_HERE below                ║
-  ║                                                      ║
-  ║  NOTE: App runs in "Development Mode" — add your     ║
-  ║  Spotify email as a test user in the dashboard       ║
-  ║  (Settings → User Management) before testing.        ║
-  ╚══════════════════════════════════════════════════════╝
+    SETUP:
+    1. Skapa en app på developer.spotify.com/dashboard
+    2. Välj "Web API" under API/SDKs
+    3. Lägg till redirect URI: https://DITT-USERNAME.github.io/DITT-REPO/
+    4. Kopiera Client ID och klistra in nedan
+    5. Lägg till ditt Spotify-konto som testanvändare (Settings > User Management)
+    6. Pusha till GitHub och aktivera GitHub Pages
   -->
+
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body, #root { min-height: 100%; }
-    body { background: #05040A; font-family: 'Syne', sans-serif; color: white; }
-    @keyframes spin   { to   { transform: rotate(360deg); } }
-    @keyframes fadein { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-    .fi { animation: fadein 0.45s ease both; }
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body, #root {
+      min-height: 100%;
+    }
+
+    body {
+      background: #05040A;
+      font-family: 'Syne', sans-serif;
+      color: white;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @keyframes fadein {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: none;
+      }
+    }
+
+    .fi {
+      animation: fadein 0.45s ease both;
+    }
   </style>
 </head>
 <body>
@@ -48,58 +70,56 @@
     const {
       RadarChart, Radar, PolarGrid, PolarAngleAxis,
       PieChart, Pie, Cell,
-      AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
+      AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer
     } = Recharts;
 
-    /* ═══════════════════════════════════════════════════
-       CONFIG — replace with YOUR Spotify Client ID
-       ═══════════════════════════════════════════════════ */
-    const CLIENT_ID    = '7eea2c95553c4c87b75e3a1fd8ca1a12';
-    const REDIRECT_URI = window.location.origin + window.location.pathname;
-    const SCOPES       = 'user-top-read user-read-recently-played user-read-private user-read-email';
+    // byt ut mot ditt client id från spotify dashboard
+    const CLIENT_ID = '7eea2c95553c4c87b75e3a1fd8ca1a12';
+    const REDIRECT_URI = https://herro2.github.io/Moodify/;
+    const SCOPES = 'user-top-read user-read-recently-played user-read-private user-read-email';
 
-    /* ═══════════════════════════════════════════════════
-       PKCE HELPERS
-       ═══════════════════════════════════════════════════ */
-    function randStr(n) {
-      const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-      const b = new Uint8Array(n);
-      crypto.getRandomValues(b);
-      return Array.from(b, x => c[x % c.length]).join('');
-    }
-    async function pkce(v) {
-      const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v));
-      return btoa(String.fromCharCode(...new Uint8Array(d)))
-        .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+    // --- PKCE auth helpers ---
+
+    function randStr(len) {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      const buf = new Uint8Array(len);
+      crypto.getRandomValues(buf);
+      return Array.from(buf, x => chars[x % chars.length]).join('');
     }
 
-    /* ═══════════════════════════════════════════════════
-       AUTH FLOW
-       ═══════════════════════════════════════════════════ */
+    async function makeChallenge(verifier) {
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+      return btoa(String.fromCharCode(...new Uint8Array(digest)))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+    }
+
     async function startLogin() {
       const verifier = randStr(64);
       localStorage.setItem('mfy_v', verifier);
-      const p = new URLSearchParams({
-        client_id: CLIENT_ID, response_type: 'code', redirect_uri: REDIRECT_URI,
-        code_challenge_method: 'S256', code_challenge: await pkce(verifier),
-        scope: SCOPES, show_dialog: 'false',
+      const params = new URLSearchParams({
+        client_id: CLIENT_ID,
+        response_type: 'code',
+        redirect_uri: REDIRECT_URI,
+        code_challenge_method: 'S256',
+        code_challenge: await makeChallenge(verifier),
+        scope: SCOPES,
+        show_dialog: 'false',
       });
-      window.location.href = 'https://accounts.spotify.com/authorize?' + p;
+      window.location.href = 'https://accounts.spotify.com/authorize?' + params;
     }
 
-    function spotifyTokenError(d, status) {
-      const raw = d.error_description || d.error || '';
-      if (status === 403 || raw.toLowerCase().includes('403'))
-        return `403 Forbidden — Redirect URI mismatch. ` +
-               `App is using: "${REDIRECT_URI}". ` +
-               `Make sure this exact URI is added under Redirect URIs in your Spotify app dashboard.`;
-      if (raw.toLowerCase().includes('invalid_client'))
-        return `Invalid Client ID. Check that CLIENT_ID in index.html is correct.`;
-      if (raw.toLowerCase().includes('invalid_grant'))
-        return `Code already used or expired. Try logging in again.`;
-      if (raw.toLowerCase().includes('not_found') || status === 404)
-        return `App not found on Spotify. Check Client ID.`;
-      return raw || `Error ${status} from Spotify`;
+    // ger bättre felmeddelanden beroende på vad spotify svarar
+    function parseSpotifyError(body, status) {
+      const msg = body.error_description || body.error || '';
+      if (status === 403 || msg.includes('403')) {
+        return `403 Forbidden — redirect URI stämmer inte. Appen skickar: "${REDIRECT_URI}". Kontrollera att exakt denna URI är inlagd i Spotify Dashboard.`;
+      }
+      if (msg.includes('invalid_client')) return 'Ogiltigt Client ID. Dubbelkolla att CLIENT_ID stämmer.';
+      if (msg.includes('invalid_grant')) return 'Koden har använts eller gått ut. Försök logga in igen.';
+      if (msg.includes('not_found') || status === 404) return 'Appen hittades inte. Kontrollera Client ID.';
+      return msg || `Spotify svarade med fel ${status}`;
     }
 
     async function exchangeCode(code) {
@@ -107,409 +127,622 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
-          client_id: CLIENT_ID, grant_type: 'authorization_code',
-          code, redirect_uri: REDIRECT_URI, code_verifier: localStorage.getItem('mfy_v'),
+          client_id: CLIENT_ID,
+          grant_type: 'authorization_code',
+          code,
+          redirect_uri: REDIRECT_URI,
+          code_verifier: localStorage.getItem('mfy_v'),
         }),
       });
-      const d = await res.json();
-      if (!d.access_token) throw new Error(spotifyTokenError(d, res.status));
-      saveTokens(d);
+      const body = await res.json();
+      if (!body.access_token) throw new Error(parseSpotifyError(body, res.status));
+      saveTokens(body);
       localStorage.removeItem('mfy_v');
       window.history.replaceState({}, '', window.location.pathname);
-      return d.access_token;
+      return body.access_token;
     }
 
-    async function doRefresh() {
+    async function refreshToken() {
       const rt = localStorage.getItem('mfy_rt');
-      if (!rt) throw new Error('No refresh token');
+      if (!rt) throw new Error('Ingen refresh token sparad');
       const res = await fetch('https://accounts.spotify.com/api/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ client_id: CLIENT_ID, grant_type: 'refresh_token', refresh_token: rt }),
+        body: new URLSearchParams({
+          client_id: CLIENT_ID,
+          grant_type: 'refresh_token',
+          refresh_token: rt,
+        }),
       });
-      const d = await res.json();
-      if (!d.access_token) throw new Error(spotifyTokenError(d, res.status));
-      saveTokens(d);
-      return d.access_token;
+      const body = await res.json();
+      if (!body.access_token) throw new Error(parseSpotifyError(body, res.status));
+      saveTokens(body);
+      return body.access_token;
     }
 
     function saveTokens({ access_token, expires_in, refresh_token }) {
-      localStorage.setItem('mfy_at',  access_token);
+      localStorage.setItem('mfy_at', access_token);
       localStorage.setItem('mfy_exp', Date.now() + expires_in * 1000);
       if (refresh_token) localStorage.setItem('mfy_rt', refresh_token);
     }
 
     async function getToken() {
       const at = localStorage.getItem('mfy_at');
-      if (at && Date.now() < parseInt(localStorage.getItem('mfy_exp')||0) - 60000) return at;
-      try { return await doRefresh(); } catch { clearAuth(); return null; }
+      const exp = parseInt(localStorage.getItem('mfy_exp') || 0);
+      // lite marginal så vi inte skickar en token som löper ut mitt i ett anrop
+      if (at && Date.now() < exp - 60000) return at;
+      try {
+        return await refreshToken();
+      } catch {
+        clearAuth();
+        return null;
+      }
     }
 
     function clearAuth() {
-      ['mfy_at','mfy_exp','mfy_rt','mfy_v'].forEach(k => localStorage.removeItem(k));
+      ['mfy_at', 'mfy_exp', 'mfy_rt', 'mfy_v'].forEach(k => localStorage.removeItem(k));
     }
 
-    /* ═══════════════════════════════════════════════════
-       SPOTIFY API
-       ═══════════════════════════════════════════════════ */
-    async function sp(token, path) {
-      const r = await fetch('https://api.spotify.com/v1' + path, {
+    // --- spotify api wrapper ---
+
+    async function apiFetch(token, path) {
+      const res = await fetch('https://api.spotify.com/v1' + path, {
         headers: { Authorization: 'Bearer ' + token },
       });
-      if (r.status === 401) { clearAuth(); throw new Error('Session expired — please log in again'); }
-      if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.error?.message || 'HTTP '+r.status); }
-      return r.json();
+      if (res.status === 401) {
+        clearAuth();
+        throw new Error('Session utgången — logga in igen');
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error?.message || 'HTTP ' + res.status);
+      }
+      return res.json();
     }
 
-    async function loadAll(token, onStatus) {
-      onStatus('Fetching your profile and top tracks...');
-      const [me, topTracks, topArtists, recent] = await Promise.all([
-        sp(token, '/me'),
-        sp(token, '/me/top/tracks?time_range=medium_term&limit=50'),
-        sp(token, '/me/top/artists?time_range=medium_term&limit=50'),
-        sp(token, '/me/player/recently-played?limit=50').catch(()=>({ items:[] })),
+    // hämtar allt vi behöver i parallell för att spara tid
+    async function loadAll(token, onStatus, timeRange, recentHours) {
+      const rangeLabel = {
+        short_term: '4 veckor',
+        medium_term: '6 månader',
+        long_term: 'alla tider'
+      }[timeRange] || timeRange;
+
+      onStatus('Hämtar topplåtar (' + rangeLabel + ')...');
+
+      const [me, topTracks, topArtists, recentRaw] = await Promise.all([
+        apiFetch(token, '/me'),
+        apiFetch(token, '/me/top/tracks?time_range=' + timeRange + '&limit=50'),
+        apiFetch(token, '/me/top/artists?time_range=' + timeRange + '&limit=50'),
+        apiFetch(token, '/me/player/recently-played?limit=50').catch(() => ({ items: [] })),
       ]);
-      onStatus('Processing your music data...');
-      // NOTE: /audio-features is deprecated for apps created after Nov 2024.
-      // All mood scores are derived from genres + popularity instead.
-      return { me, topTracks, topArtists, recent };
+
+      onStatus('Bearbetar musikdata...');
+
+      let recentItems = recentRaw.items || [];
+      if (recentHours) {
+        const cutoff = Date.now() - recentHours * 3600 * 1000;
+        recentItems = recentItems.filter(i => i.played_at && new Date(i.played_at).getTime() > cutoff);
+      }
+
+      return { me, topTracks, topArtists, recent: { items: recentItems } };
     }
 
-    /* ═══════════════════════════════════════════════════
-       DATA CRUNCHING (no audio-features needed)
-       ═══════════════════════════════════════════════════ */
-
-    // Genre → mood weights [energy, happiness, danceability, acoustic, complex]
-    const GENRE_MOOD = {
-      'pop':           [0.65, 0.75, 0.72, 0.25, 0.30],
-      'dance':         [0.82, 0.72, 0.88, 0.10, 0.35],
-      'edm':           [0.88, 0.65, 0.84, 0.05, 0.50],
-      'electronic':    [0.78, 0.58, 0.75, 0.08, 0.60],
-      'house':         [0.80, 0.68, 0.85, 0.08, 0.45],
-      'techno':        [0.85, 0.45, 0.80, 0.05, 0.65],
-      'hip hop':       [0.72, 0.62, 0.82, 0.12, 0.55],
-      'rap':           [0.74, 0.58, 0.80, 0.10, 0.60],
-      'trap':          [0.76, 0.50, 0.78, 0.08, 0.55],
-      'r&b':           [0.58, 0.68, 0.72, 0.28, 0.50],
-      'rock':          [0.78, 0.52, 0.55, 0.22, 0.55],
-      'metal':         [0.90, 0.35, 0.45, 0.08, 0.72],
-      'punk':          [0.88, 0.50, 0.60, 0.15, 0.48],
-      'indie':         [0.55, 0.58, 0.58, 0.48, 0.62],
-      'alternative':   [0.60, 0.52, 0.55, 0.38, 0.60],
-      'post-rock':     [0.60, 0.42, 0.35, 0.40, 0.80],
-      'math rock':     [0.65, 0.48, 0.40, 0.35, 0.88],
-      'ambient':       [0.22, 0.48, 0.28, 0.68, 0.72],
-      'classical':     [0.30, 0.62, 0.28, 0.88, 0.82],
-      'jazz':          [0.42, 0.65, 0.58, 0.72, 0.85],
-      'blues':         [0.48, 0.52, 0.55, 0.65, 0.68],
-      'folk':          [0.38, 0.62, 0.48, 0.80, 0.58],
-      'country':       [0.52, 0.65, 0.58, 0.72, 0.42],
-      'soul':          [0.52, 0.70, 0.65, 0.55, 0.60],
-      'funk':          [0.72, 0.72, 0.82, 0.30, 0.65],
-      'latin':         [0.72, 0.75, 0.85, 0.30, 0.45],
-      'reggae':        [0.52, 0.72, 0.75, 0.55, 0.42],
-      'lo-fi':         [0.28, 0.55, 0.55, 0.65, 0.58],
-      'experimental':  [0.55, 0.38, 0.42, 0.40, 0.90],
-      'shoegaze':      [0.55, 0.42, 0.38, 0.45, 0.75],
+    // --- mood beräkning baserat på genre ---
+    // varje genre mappas till [energi, glädje, dansbarhet, akustisk, komplexitet]
+    const GENRE_MOODS = {
+      'pop':          [0.65, 0.75, 0.72, 0.25, 0.30],
+      'dance':        [0.82, 0.72, 0.88, 0.10, 0.35],
+      'edm':          [0.88, 0.65, 0.84, 0.05, 0.50],
+      'electronic':   [0.78, 0.58, 0.75, 0.08, 0.60],
+      'house':        [0.80, 0.68, 0.85, 0.08, 0.45],
+      'techno':       [0.85, 0.45, 0.80, 0.05, 0.65],
+      'hip hop':      [0.72, 0.62, 0.82, 0.12, 0.55],
+      'rap':          [0.74, 0.58, 0.80, 0.10, 0.60],
+      'trap':         [0.76, 0.50, 0.78, 0.08, 0.55],
+      'r&b':          [0.58, 0.68, 0.72, 0.28, 0.50],
+      'rock':         [0.78, 0.52, 0.55, 0.22, 0.55],
+      'metal':        [0.90, 0.35, 0.45, 0.08, 0.72],
+      'punk':         [0.88, 0.50, 0.60, 0.15, 0.48],
+      'indie':        [0.55, 0.58, 0.58, 0.48, 0.62],
+      'alternative':  [0.60, 0.52, 0.55, 0.38, 0.60],
+      'post-rock':    [0.60, 0.42, 0.35, 0.40, 0.80],
+      'math rock':    [0.65, 0.48, 0.40, 0.35, 0.88],
+      'ambient':      [0.22, 0.48, 0.28, 0.68, 0.72],
+      'classical':    [0.30, 0.62, 0.28, 0.88, 0.82],
+      'jazz':         [0.42, 0.65, 0.58, 0.72, 0.85],
+      'blues':        [0.48, 0.52, 0.55, 0.65, 0.68],
+      'folk':         [0.38, 0.62, 0.48, 0.80, 0.58],
+      'country':      [0.52, 0.65, 0.58, 0.72, 0.42],
+      'soul':         [0.52, 0.70, 0.65, 0.55, 0.60],
+      'funk':         [0.72, 0.72, 0.82, 0.30, 0.65],
+      'latin':        [0.72, 0.75, 0.85, 0.30, 0.45],
+      'reggae':       [0.52, 0.72, 0.75, 0.55, 0.42],
+      'lo-fi':        [0.28, 0.55, 0.55, 0.65, 0.58],
+      'experimental': [0.55, 0.38, 0.42, 0.40, 0.90],
+      'shoegaze':     [0.55, 0.42, 0.38, 0.45, 0.75],
     };
 
-    function genreWeights(topArtists) {
-      const scores = { en:[], ha:[], da:[], ac:[], cx:[] };
-      (topArtists.items||[]).forEach(a => {
-        (a.genres||[]).forEach(g => {
-          const gl = g.toLowerCase();
-          for (const [kw, w] of Object.entries(GENRE_MOOD)) {
-            if (gl.includes(kw)) {
-              scores.en.push(w[0]); scores.ha.push(w[1]);
-              scores.da.push(w[2]); scores.ac.push(w[3]); scores.cx.push(w[4]);
+    function getGenreWeights(topArtists) {
+      const en = [], ha = [], da = [], ac = [], cx = [];
+      for (const artist of topArtists.items || []) {
+        for (const genre of artist.genres || []) {
+          const g = genre.toLowerCase();
+          for (const [kw, weights] of Object.entries(GENRE_MOODS)) {
+            if (g.includes(kw)) {
+              en.push(weights[0]);
+              ha.push(weights[1]);
+              da.push(weights[2]);
+              ac.push(weights[3]);
+              cx.push(weights[4]);
               break;
             }
           }
-        });
-      });
-      const m = arr => arr.length ? arr.reduce((s,v)=>s+v,0)/arr.length : 0.5;
-      return { en:m(scores.en), ha:m(scores.ha), da:m(scores.da), ac:m(scores.ac), cx:m(scores.cx) };
+        }
+      }
+      const avg = arr => arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : 0.5;
+      return { en: avg(en), ha: avg(ha), da: avg(da), ac: avg(ac), cx: avg(cx) };
     }
 
-    function mood(topArtists, ms) {
-      const w = genreWeights(topArtists);
-      const popBoost = (ms/100) * 0.08;
-      const en = Math.min(1, w.en);
-      const ha = Math.min(1, w.ha + popBoost);
-      const da = Math.min(1, w.da + popBoost * 0.5);
-      const ac = w.ac;
-      const cx = Math.max(0, w.cx - popBoost);
+    function calcMood(topArtists, mainstreamnessScore) {
+      const w = getGenreWeights(topArtists);
+      // populärare lyssnare tenderar vara lite gladare/mer dansanta
+      const boost = (mainstreamnessScore / 100) * 0.08;
       return {
-        happiness:    Math.round(ha * 100),
-        energy:       Math.round(en * 100),
-        sadness:      Math.round(((1-ha)*.6 + (1-en)*.4) * 100),
-        focus:        Math.round((cx*.55 + ac*.25 + (1-da)*.2) * 100),
-        danceability: Math.round(da * 100),
-        aggression:   Math.round((en*.45 + (1-ha)*.35 + (1-ac)*.2) * 100),
-        chill:        Math.round((ac*.45 + (1-en)*.35 + ha*.2) * 100),
+        happiness:    Math.round(Math.min(1, w.ha + boost) * 100),
+        energy:       Math.round(Math.min(1, w.en) * 100),
+        sadness:      Math.round(((1 - w.ha) * 0.6 + (1 - w.en) * 0.4) * 100),
+        focus:        Math.round((w.cx * 0.55 + w.ac * 0.25 + (1 - w.da) * 0.2) * 100),
+        danceability: Math.round(Math.min(1, w.da + boost * 0.5) * 100),
+        aggression:   Math.round((w.en * 0.45 + (1 - w.ha) * 0.35 + (1 - w.ac) * 0.2) * 100),
+        chill:        Math.round((w.ac * 0.45 + (1 - w.en) * 0.35 + w.ha * 0.2) * 100),
       };
     }
 
-    function radarData(topArtists, ms) {
-      const w = genreWeights(topArtists);
+    function getRadarData(topArtists, ms) {
+      const w = getGenreWeights(topArtists);
       return [
-        { s:'Melodic',    A:Math.round(((1-w.en)*.5 + w.ha*.5) * 100) },
-        { s:'Intense',    A:Math.round((w.en*.6 + (1-w.ac)*.4) * 100) },
-        { s:'Electronic', A:Math.round((1-w.ac) * 100) },
-        { s:'Acoustic',   A:Math.round(w.ac * 100) },
-        { s:'Complex',    A:Math.round(w.cx * 100) },
-        { s:'Mainstream', A:Math.round(ms) },
+        { s: 'Melodic',    A: Math.round(((1 - w.en) * 0.5 + w.ha * 0.5) * 100) },
+        { s: 'Intense',    A: Math.round((w.en * 0.6 + (1 - w.ac) * 0.4) * 100) },
+        { s: 'Electronic', A: Math.round((1 - w.ac) * 100) },
+        { s: 'Acoustic',   A: Math.round(w.ac * 100) },
+        { s: 'Complex',    A: Math.round(w.cx * 100) },
+        { s: 'Mainstream', A: Math.round(ms) },
       ];
     }
 
-    const GBUCKETS = {
-      'Pop':['pop','chart','teen','viral'],
-      'Rock':['rock','metal','punk','grunge','emo','hardcore'],
-      'Electronic':['electronic','electro','techno','house','edm','synth','trance','dubstep','ambient','idm','dnb','drum'],
-      'Hip-Hop':['hip hop','hip-hop','rap','trap','drill','r&b','rnb'],
-      'Indie Alt':['indie','alternative','lo-fi','lo fi','shoegaze','dreampop'],
-      'Post-Rock':['post-rock','post rock','math rock','post metal','noise rock','experimental'],
-      'Folk':['folk','singer-songwriter','acoustic','country','americana'],
-      'Jazz/Blues':['jazz','blues','funk','soul','gospel'],
+    // gruppar genrer i bredare kategorier
+    const GENRE_BUCKETS = {
+      'Pop':        ['pop', 'chart', 'teen', 'viral'],
+      'Rock':       ['rock', 'metal', 'punk', 'grunge', 'emo', 'hardcore'],
+      'Electronic': ['electronic', 'electro', 'techno', 'house', 'edm', 'synth', 'trance', 'dubstep', 'ambient', 'idm', 'dnb', 'drum'],
+      'Hip-Hop':    ['hip hop', 'hip-hop', 'rap', 'trap', 'drill', 'r&b', 'rnb'],
+      'Indie Alt':  ['indie', 'alternative', 'lo-fi', 'lo fi', 'shoegaze', 'dreampop'],
+      'Post-Rock':  ['post-rock', 'post rock', 'math rock', 'post metal', 'noise rock', 'experimental'],
+      'Folk':       ['folk', 'singer-songwriter', 'acoustic', 'country', 'americana'],
+      'Jazz/Blues': ['jazz', 'blues', 'funk', 'soul', 'gospel'],
     };
 
-    function genreData(topArtists) {
-      const c={};
-      (topArtists.items||[]).forEach(a=>(a.genres||[]).forEach(g=>{
-        const gl=g.toLowerCase();
-        for(const [b,kws] of Object.entries(GBUCKETS)) if(kws.some(k=>gl.includes(k))){ c[b]=(c[b]||0)+1; break; }
-      }));
-      const tot=Math.max(1,Object.values(c).reduce((s,v)=>s+v,0));
-      return Object.entries(c).sort((a,b)=>b[1]-a[1]).slice(0,6)
-        .map(([n,v],i)=>({ name:n, value:Math.round((v/tot)*100), color:[PU,CY,G,OR,PK,'#888'][i] }));
+    function getGenreData(topArtists) {
+      const counts = {};
+      for (const artist of topArtists.items || []) {
+        for (const genre of artist.genres || []) {
+          const g = genre.toLowerCase();
+          for (const [bucket, keywords] of Object.entries(GENRE_BUCKETS)) {
+            if (keywords.some(k => g.includes(k))) {
+              counts[bucket] = (counts[bucket] || 0) + 1;
+              break;
+            }
+          }
+        }
+      }
+      const total = Math.max(1, Object.values(counts).reduce((s, v) => s + v, 0));
+      const COLORS = [PU, CY, G, OR, PK, '#888'];
+      return Object.entries(counts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 6)
+        .map(([name, val], i) => ({
+          name,
+          value: Math.round((val / total) * 100),
+          color: COLORS[i],
+        }));
     }
 
-    function trendData(items) {
-      const DAYS=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], days={};
-      (items||[]).forEach(item=>{
-        if(!item.played_at||!item.track) return;
-        const d=new Date(item.played_at),
-              k=`${d.getFullYear()}-${String(d.getMonth()).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-        if(!days[k]) days[k]={ label:DAYS[d.getDay()], pops:[] };
-        days[k].pops.push(item.track.popularity||50);
-      });
-      return Object.entries(days).sort(([a],[b])=>a.localeCompare(b)).slice(-7)
-        .map(([,v])=>{
-          const ap=v.pops.length?v.pops.reduce((s,p)=>s+p,0)/v.pops.length:50;
-          return { day:v.label, energy:Math.round(40+ap*.55), happiness:Math.round(35+ap*.6) };
+    function getTrendData(items) {
+      const dayNames = ['Sön', 'Mån', 'Tis', 'Ons', 'Tor', 'Fre', 'Lör'];
+      const byDay = {};
+      for (const item of items || []) {
+        if (!item.played_at || !item.track) continue;
+        const d = new Date(item.played_at);
+        const key = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        if (!byDay[key]) byDay[key] = { label: dayNames[d.getDay()], pops: [] };
+        byDay[key].pops.push(item.track.popularity || 50);
+      }
+      return Object.entries(byDay)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .slice(-7)
+        .map(([, day]) => {
+          const avg = day.pops.reduce((s, p) => s + p, 0) / day.pops.length;
+          return {
+            day: day.label,
+            energy: Math.round(40 + avg * 0.55),
+            happiness: Math.round(35 + avg * 0.6),
+          };
         });
     }
 
-    function mainstream(ta) {
-      const it=ta.items||[]; if(!it.length) return 50;
-      return Math.round(it.reduce((s,a)=>s+a.popularity,0)/it.length);
+    function getMainstream(topArtists) {
+      const artists = topArtists.items || [];
+      if (!artists.length) return 50;
+      return Math.round(artists.reduce((s, a) => s + a.popularity, 0) / artists.length);
     }
 
-    function personality(m, ms) {
-      const time  = m.energy>65 ? 'day listener' : 'night listener';
-      const type  = m.focus>55  ? 'analytical'   : 'emotion-driven';
-      const main  = ms<35 ? 'precisely avoids mainstream' : ms<65 ? 'balances mainstream and niche' : 'embraces popular culture';
-      const vibe  = m.energy>70 ? 'high intensity' : m.chill>65 ? 'calm and atmospheric style' : 'varied dynamics';
-      const depth = m.focus>60  ? 'emotionally complex music' : 'well-produced melodic music';
-      return `You are an ${type} ${time} who ${main} and gravitates toward ${depth} with ${vibe}.`;
+    function getPersonalityText(m, ms) {
+      const time = m.energy > 65 ? 'dagslyssnare' : 'nattlyssnare';
+      const type = m.focus > 55 ? 'analytisk' : 'känslodriven';
+      const mainstream = ms < 35
+        ? 'undviker mainstream med precision'
+        : ms < 65
+          ? 'balanserar mainstream och nisch'
+          : 'embracar populärkultur';
+      const vibe = m.energy > 70 ? 'hög intensitet' : m.chill > 65 ? 'lugn och atmosfärisk stil' : 'varierad dynamik';
+      const depth = m.focus > 60 ? 'emotionellt komplex musik' : 'välproducerad melodisk musik';
+      return `Du är en ${type} ${time} som ${mainstream} och graviterar mot ${depth} med ${vibe}.`;
     }
 
-    function tags(m, ms) {
+    function getTags(m, ms) {
       return [
-        m.energy>70 ? 'High Energy' : m.chill>60 ? 'Chill Listener' : 'Balanced',
-        ms<35 ? 'Anti-Mainstream' : ms>70 ? 'Mainstream' : 'Niche Nerd',
-        m.focus>60 ? 'Complex Taste' : 'Melodic Taste',
-        m.happiness>60 ? 'Positive Vibes' : 'Dark Vibes',
+        m.energy > 70 ? 'Hög energi' : m.chill > 60 ? 'Chill lyssnare' : 'Balanserad',
+        ms < 35 ? 'Anti-mainstream' : ms > 70 ? 'Mainstream' : 'Nisch-nörd',
+        m.focus > 60 ? 'Komplex smak' : 'Melodisk smak',
+        m.happiness > 60 ? 'Positiv vibe' : 'Mörk vibe',
       ];
     }
 
-    function funStats(topTracks, topArtists, ms) {
-      const tracks=topTracks.items||[], artists=topArtists.items||[];
-      const least = tracks.slice().sort((a,b)=>a.popularity-b.popularity)[0];
-      const most  = tracks.slice().sort((a,b)=>b.popularity-a.popularity)[0];
-      const obs   = artists.slice().sort((a,b)=>a.popularity-b.popularity)[0];
-      const hg    = Math.round((1-ms/100)*100);
-      const iq    = Math.min(160, Math.round(80+hg*.55+(100-ms)*.25));
+    function getFunStats(topTracks, topArtists, ms) {
+      const tracks = topTracks.items || [];
+      const artists = topArtists.items || [];
+      const leastPopular = [...tracks].sort((a, b) => a.popularity - b.popularity)[0];
+      const mostPopular = [...tracks].sort((a, b) => b.popularity - a.popularity)[0];
+      const obscureArtist = [...artists].sort((a, b) => a.popularity - b.popularity)[0];
+      const hiddenGem = Math.round((1 - ms / 100) * 100);
+      const musicIQ = Math.min(160, Math.round(80 + hiddenGem * 0.55 + (100 - ms) * 0.25));
       return [
-        { label:"Mainstream %",      value:`${ms}%`,            sub:ms<40?"Indie af":ms<70?"Balanced":"Mainstream enjoyer", color:CY },
-        { label:"Hidden Gem Score",  value:String(hg),          sub:hg>70?"Top underground":"Underground nerd",            color:PU },
-        { label:"Music IQ",          value:String(iq),          sub:"Complexity nerd",                                     color:G  },
-        { label:"Least Popular",     value:least?.name||"—",    sub:least?(least.artists||[{}])[0]?.name||"":"",           color:PK },
-        { label:"Most Popular",      value:most?.name||"—",     sub:most?(most.artists||[{}])[0]?.name||"":"",             color:OR },
-        { label:"Most Obscure Artist",value:obs?.name||"—",     sub:obs?`${obs.popularity}% popularity`:"",               color:"#FF4444" },
+        { label: 'Mainstream %',     value: `${ms}%`,                 sub: ms < 40 ? 'Indie af' : ms < 70 ? 'Balanced' : 'Mainstream enjoyer', color: CY },
+        { label: 'Hidden Gem Score', value: String(hiddenGem),        sub: hiddenGem > 70 ? 'Top underground' : 'Underground nörd',             color: PU },
+        { label: 'Musik-IQ',         value: String(musicIQ),          sub: 'Komplexitetsnörd',                                                  color: G  },
+        { label: 'Minst populär',    value: leastPopular?.name || '—', sub: leastPopular ? (leastPopular.artists[0]?.name || '') : '',           color: PK },
+        { label: 'Mest populär',     value: mostPopular?.name || '—', sub: mostPopular ? (mostPopular.artists[0]?.name || '') : '',              color: OR },
+        { label: 'Mest ovanliga',    value: obscureArtist?.name || '—', sub: obscureArtist ? `${obscureArtist.popularity}% popularitet` : '',   color: '#FF4444' },
       ];
     }
 
-    /* ═══════════════════════════════════════════════════
-       DESIGN TOKENS
-       ═══════════════════════════════════════════════════ */
-    const G='#1DB954', CY='#00D9F5', PU='#B026FF', PK='#FF2D78', OR='#FF6B35';
-    const MOOD_META=[
-      {key:'happiness',    label:'Happiness',    color:G,         icon:'☀' },
-      {key:'energy',       label:'Energy',       color:OR,        icon:'⚡'},
-      {key:'sadness',      label:'Sadness',      color:CY,        icon:'🌧'},
-      {key:'focus',        label:'Focus',        color:PU,        icon:'◎' },
-      {key:'danceability', label:'Danceability', color:PK,        icon:'♫' },
-      {key:'aggression',   label:'Aggression',   color:'#FF4444', icon:'🔥'},
-      {key:'chill',        label:'Chill',        color:'#44DDBB', icon:'✦' },
+    // designfärger
+    const G = '#1DB954';
+    const CY = '#00D9F5';
+    const PU = '#B026FF';
+    const PK = '#FF2D78';
+    const OR = '#FF6B35';
+
+    const MOOD_ITEMS = [
+      { key: 'happiness',    label: 'Happiness',    color: G,         icon: '☀'  },
+      { key: 'energy',       label: 'Energy',       color: OR,        icon: '⚡' },
+      { key: 'sadness',      label: 'Sadness',      color: CY,        icon: '🌧' },
+      { key: 'focus',        label: 'Focus',        color: PU,        icon: '◎'  },
+      { key: 'danceability', label: 'Danceability', color: PK,        icon: '♫'  },
+      { key: 'aggression',   label: 'Aggression',   color: '#FF4444', icon: '🔥' },
+      { key: 'chill',        label: 'Chill',        color: '#44DDBB', icon: '✦'  },
     ];
 
-    /* ═══════════════════════════════════════════════════
-       SMALL UI COMPONENTS
-       ═══════════════════════════════════════════════════ */
-    function Ring({val,color,size=80}) {
-      const r=(size-12)/2, circ=2*Math.PI*r;
+    // --- komponenter ---
+
+    function Ring({ val, color, size = 80 }) {
+      const r = (size - 12) / 2;
+      const circumference = 2 * Math.PI * r;
+      const filled = (val / 100) * circumference;
       return (
-        <svg width={size} height={size} style={{transform:'rotate(-90deg)'}}>
-          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={6}/>
-          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={6}
-            strokeDasharray={`${(val/100)*circ} ${(1-val/100)*circ}`} strokeLinecap="round"
-            style={{transition:'stroke-dasharray 1.3s cubic-bezier(0.34,1.56,0.64,1)'}}/>
+        <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none"
+            stroke="rgba(255,255,255,0.07)" strokeWidth={6} />
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none"
+            stroke={color} strokeWidth={6}
+            strokeDasharray={`${filled} ${circumference - filled}`}
+            strokeLinecap="round"
+            style={{ transition: 'stroke-dasharray 1.3s cubic-bezier(0.34,1.56,0.64,1)' }} />
         </svg>
       );
     }
 
-    function MoodCard({item,idx,value}) {
-      const [show,setShow]=useState(false);
-      useEffect(()=>{const t=setTimeout(()=>setShow(true),150+idx*70);return()=>clearTimeout(t);},[idx]);
+    function MoodCard({ item, idx, value }) {
+      const [visible, setVisible] = useState(false);
+      useEffect(() => {
+        const t = setTimeout(() => setVisible(true), 150 + idx * 70);
+        return () => clearTimeout(t);
+      }, [idx]);
+
       return (
-        <div className="fi" style={{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.08)',
-          borderRadius:16,padding:'18px 14px',display:'flex',flexDirection:'column',
-          alignItems:'center',gap:10,backdropFilter:'blur(12px)',transition:'border-color 0.2s',cursor:'default',
-          animationDelay:`${idx*.06}s`}}
-          onMouseEnter={e=>e.currentTarget.style.borderColor=item.color+'55'}
-          onMouseLeave={e=>e.currentTarget.style.borderColor='rgba(255,255,255,0.08)'}>
-          <div style={{position:'relative',width:80,height:80}}>
-            <Ring val={show?value:0} color={item.color}/>
-            <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column'}}>
-              <span style={{fontSize:18,lineHeight:1}}>{item.icon}</span>
-              <span style={{fontSize:13,fontWeight:700,color:item.color,fontFamily:'JetBrains Mono,monospace'}}>{show?value:0}</span>
+        <div
+          className="fi"
+          style={{
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: 16,
+            padding: '18px 14px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 10,
+            backdropFilter: 'blur(12px)',
+            transition: 'border-color 0.2s',
+            cursor: 'default',
+            animationDelay: `${idx * 0.06}s`,
+          }}
+          onMouseEnter={e => e.currentTarget.style.borderColor = item.color + '55'}
+          onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'}
+        >
+          <div style={{ position: 'relative', width: 80, height: 80 }}>
+            <Ring val={visible ? value : 0} color={item.color} />
+            <div style={{
+              position: 'absolute', inset: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column'
+            }}>
+              <span style={{ fontSize: 18, lineHeight: 1 }}>{item.icon}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: item.color, fontFamily: 'JetBrains Mono, monospace' }}>
+                {visible ? value : 0}
+              </span>
             </div>
           </div>
-          <span style={{fontSize:12,color:'rgba(255,255,255,.55)',textAlign:'center',letterSpacing:'.04em'}}>{item.label.toUpperCase()}</span>
+          <span style={{
+            fontSize: 12, color: 'rgba(255,255,255,.55)',
+            textAlign: 'center', letterSpacing: '.04em'
+          }}>
+            {item.label.toUpperCase()}
+          </span>
         </div>
       );
     }
 
-    function Wave({energy}) {
+    // liten waveform-animation baserad på energinivå
+    function Wave({ energy }) {
       return (
-        <div style={{display:'flex',alignItems:'flex-end',gap:2,height:20}}>
-          {Array.from({length:12},(_,i)=>{
-            const h=Math.max(3,Math.round((energy/100)*16*(.4+.6*Math.sin((i/12)*Math.PI+.5))));
-            return <div key={i} style={{width:3,height:h,borderRadius:2,background:`rgba(29,185,84,${.4+(energy/100)*.6})`}}/>;
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 20 }}>
+          {Array.from({ length: 12 }, (_, i) => {
+            const h = Math.max(3, Math.round((energy / 100) * 16 * (0.4 + 0.6 * Math.sin((i / 12) * Math.PI + 0.5))));
+            const opacity = 0.4 + (energy / 100) * 0.6;
+            return <div key={i} style={{ width: 3, height: h, borderRadius: 2, background: `rgba(29,185,84,${opacity})` }} />;
           })}
         </div>
       );
     }
 
-    function Tip({active,payload,label}) {
-      if(!active||!payload?.length) return null;
+    function ChartTooltip({ active, payload, label }) {
+      if (!active || !payload?.length) return null;
       return (
-        <div style={{background:'rgba(10,8,20,.95)',border:'1px solid rgba(255,255,255,.1)',borderRadius:10,padding:'10px 14px'}}>
-          <p style={{color:'rgba(255,255,255,.5)',fontSize:12,margin:'0 0 6px',fontFamily:'JetBrains Mono,monospace'}}>{label}</p>
-          {payload.map(p=><p key={p.name} style={{color:p.stroke,fontSize:13,margin:0,fontWeight:600}}>{p.name}: {p.value}</p>)}
+        <div style={{
+          background: 'rgba(10,8,20,.95)',
+          border: '1px solid rgba(255,255,255,.1)',
+          borderRadius: 10,
+          padding: '10px 14px',
+        }}>
+          <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 12, margin: '0 0 6px', fontFamily: 'JetBrains Mono, monospace' }}>{label}</p>
+          {payload.map(p => (
+            <p key={p.name} style={{ color: p.stroke, fontSize: 13, margin: 0, fontWeight: 600 }}>
+              {p.name}: {p.value}
+            </p>
+          ))}
         </div>
       );
     }
 
-    function Section({title,children}) {
+    function Section({ title, children }) {
       return (
-        <section style={{marginBottom:40}}>
-          <h2 style={{fontSize:13,fontWeight:600,color:'rgba(255,255,255,.35)',letterSpacing:'.12em',textTransform:'uppercase',marginBottom:16}}>{title}</h2>
+        <section style={{ marginBottom: 40 }}>
+          <h2 style={{
+            fontSize: 13, fontWeight: 600,
+            color: 'rgba(255,255,255,.35)',
+            letterSpacing: '.12em',
+            textTransform: 'uppercase',
+            marginBottom: 16,
+          }}>
+            {title}
+          </h2>
           {children}
         </section>
       );
     }
 
-    function GlassCard({children,style={},border=''}) {
-      return <div style={{background:'rgba(255,255,255,.03)',border:`1px solid ${border||'rgba(255,255,255,.07)'}`,borderRadius:20,padding:24,backdropFilter:'blur(12px)',...style}}>{children}</div>;
+    function GlassCard({ children, style = {}, border = '' }) {
+      return (
+        <div style={{
+          background: 'rgba(255,255,255,.03)',
+          border: `1px solid ${border || 'rgba(255,255,255,.07)'}`,
+          borderRadius: 20,
+          padding: 24,
+          backdropFilter: 'blur(12px)',
+          ...style,
+        }}>
+          {children}
+        </div>
+      );
     }
 
-    /* ═══════════════════════════════════════════════════
-       LOGIN
-       ═══════════════════════════════════════════════════ */
-    function Login({onLogin,error,loading}) {
-      const cvs=useRef(null);
-      useEffect(()=>{
-        const c=cvs.current; if(!c) return;
-        const ctx=c.getContext('2d'); let id;
-        c.width=c.offsetWidth; c.height=c.offsetHeight;
-        const W=c.width,H=c.height;
-        const pts=Array.from({length:55},()=>({
-          x:Math.random()*W,y:Math.random()*H,r:Math.random()*1.4+.3,
-          vx:(Math.random()-.5)*.35,vy:(Math.random()-.5)*.35,
-          col:[G,CY,PU,PK][0|Math.random()*4],a:Math.random()*.5+.15,
+    // inloggningsskärm med partikelbakgrund
+    function Login({ onLogin, error, loading }) {
+      const canvasRef = useRef(null);
+
+      useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        canvas.width = canvas.offsetWidth;
+        canvas.height = canvas.offsetHeight;
+        const W = canvas.width, H = canvas.height;
+
+        const particles = Array.from({ length: 55 }, () => ({
+          x: Math.random() * W,
+          y: Math.random() * H,
+          r: Math.random() * 1.4 + 0.3,
+          vx: (Math.random() - 0.5) * 0.35,
+          vy: (Math.random() - 0.5) * 0.35,
+          col: [G, CY, PU, PK][Math.floor(Math.random() * 4)],
+          a: Math.random() * 0.5 + 0.15,
         }));
-        const draw=()=>{
-          ctx.clearRect(0,0,W,H);
-          pts.forEach(p=>{
-            p.x+=p.vx;p.y+=p.vy;
-            if(p.x<0)p.x=W;if(p.x>W)p.x=0;if(p.y<0)p.y=H;if(p.y>H)p.y=0;
-            ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
-            ctx.fillStyle=p.col+Math.round(p.a*255).toString(16).padStart(2,'0');ctx.fill();
-          });
-          pts.forEach((p,i)=>{
-            for(let j=i+1;j<pts.length;j++){
-              const q=pts[j],d=Math.hypot(p.x-q.x,p.y-q.y);
-              if(d<90){ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(q.x,q.y);
-                ctx.strokeStyle=`rgba(29,185,84,${(1-d/90)*.07})`;ctx.lineWidth=.5;ctx.stroke();}
+
+        let frameId;
+        const draw = () => {
+          ctx.clearRect(0, 0, W, H);
+          for (const p of particles) {
+            p.x += p.vx; p.y += p.vy;
+            if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+            if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+            ctx.fillStyle = p.col + Math.round(p.a * 255).toString(16).padStart(2, '0');
+            ctx.fill();
+          }
+          // linjer mellan nära partiklar
+          for (let i = 0; i < particles.length; i++) {
+            for (let j = i + 1; j < particles.length; j++) {
+              const dist = Math.hypot(particles[i].x - particles[j].x, particles[i].y - particles[j].y);
+              if (dist < 90) {
+                ctx.beginPath();
+                ctx.moveTo(particles[i].x, particles[i].y);
+                ctx.lineTo(particles[j].x, particles[j].y);
+                ctx.strokeStyle = `rgba(29,185,84,${(1 - dist / 90) * 0.07})`;
+                ctx.lineWidth = 0.5;
+                ctx.stroke();
+              }
             }
-          });
-          id=requestAnimationFrame(draw);
+          }
+          frameId = requestAnimationFrame(draw);
         };
         draw();
-        return()=>cancelAnimationFrame(id);
-      },[]);
+        return () => cancelAnimationFrame(frameId);
+      }, []);
 
       return (
-        <div style={{minHeight:'100vh',background:'#05040A',display:'flex',alignItems:'center',justifyContent:'center',position:'relative',overflow:'hidden'}}>
-          <canvas ref={cvs} style={{position:'absolute',inset:0,width:'100%',height:'100%',opacity:.6}}/>
-          <div style={{position:'absolute',width:500,height:500,borderRadius:'50%',background:`radial-gradient(circle,${PU}18 0%,transparent 70%)`,top:'5%',left:'55%',filter:'blur(50px)',pointerEvents:'none'}}/>
-          <div style={{position:'relative',zIndex:2,display:'flex',flexDirection:'column',alignItems:'center',gap:32,maxWidth:420,width:'90%'}}>
-            <div style={{textAlign:'center'}}>
-              <div style={{fontSize:54,fontWeight:800,letterSpacing:'-2px',background:`linear-gradient(135deg,${G},${CY})`,WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',marginBottom:4}}>Moodify</div>
-              <div style={{fontSize:14,color:'rgba(255,255,255,.4)',fontFamily:'JetBrains Mono,monospace',letterSpacing:'.1em'}}>SPOTIFY MOOD ANALYZER</div>
+        <div style={{
+          minHeight: '100vh', background: '#05040A',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          position: 'relative', overflow: 'hidden',
+        }}>
+          <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0.6 }} />
+          <div style={{
+            position: 'absolute', width: 500, height: 500, borderRadius: '50%',
+            background: `radial-gradient(circle,${PU}18 0%,transparent 70%)`,
+            top: '5%', left: '55%', filter: 'blur(50px)', pointerEvents: 'none',
+          }} />
+          <div style={{
+            position: 'relative', zIndex: 2,
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            gap: 32, maxWidth: 420, width: '90%',
+          }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{
+                fontSize: 54, fontWeight: 800, letterSpacing: '-2px',
+                background: `linear-gradient(135deg,${G},${CY})`,
+                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                marginBottom: 4,
+              }}>
+                Moodify
+              </div>
+              <div style={{ fontSize: 14, color: 'rgba(255,255,255,.4)', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '.1em' }}>
+                SPOTIFY MOOD ANALYZER
+              </div>
             </div>
-            <div style={{background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.1)',borderRadius:20,padding:'36px 32px',backdropFilter:'blur(20px)',width:'100%',textAlign:'center'}}>
-              <div style={{fontSize:42,marginBottom:16}}>🎧</div>
-              <h2 style={{fontSize:22,fontWeight:700,margin:'0 0 10px'}}>Your music. Your mood.</h2>
-              <p style={{color:'rgba(255,255,255,.45)',fontSize:14,lineHeight:1.65,margin:'0 0 28px'}}>
-                Log in with your Spotify account to analyze your music taste and discover your unique music personality.
+
+            <div style={{
+              background: 'rgba(255,255,255,.04)',
+              border: '1px solid rgba(255,255,255,.1)',
+              borderRadius: 20, padding: '36px 32px',
+              backdropFilter: 'blur(20px)', width: '100%', textAlign: 'center',
+            }}>
+              <div style={{ fontSize: 42, marginBottom: 16 }}>🎧</div>
+              <h2 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 10px' }}>Din musik. Ditt mood.</h2>
+              <p style={{ color: 'rgba(255,255,255,.45)', fontSize: 14, lineHeight: 1.65, margin: '0 0 28px' }}>
+                Logga in med Spotify för att analysera din musiksmak och se din unika musikpersonlighet.
               </p>
-              {error&&(
-                <div style={{background:'rgba(255,50,50,.08)',border:'1px solid rgba(255,80,80,.3)',borderRadius:12,padding:'14px 16px',marginBottom:20,textAlign:'left'}}>
-                  <div style={{fontSize:13,color:'#ff8080',lineHeight:1.6,marginBottom:10}}>⚠ {error}</div>
-                  {(error.includes('Redirect URI') || error.includes('Client ID')) && (
-                    <div style={{background:'rgba(0,0,0,.3)',borderRadius:8,padding:'10px 12px'}}>
-                      <div style={{fontSize:11,color:'rgba(255,255,255,.3)',fontFamily:'JetBrains Mono,monospace',marginBottom:6}}>ADD THIS EXACT URI IN SPOTIFY DASHBOARD:</div>
-                      <div style={{display:'flex',alignItems:'center',gap:8}}>
-                        <code style={{fontSize:12,color:CY,fontFamily:'JetBrains Mono,monospace',wordBreak:'break-all',flex:1}}>{REDIRECT_URI}</code>
-                        <button onClick={()=>navigator.clipboard.writeText(REDIRECT_URI)} style={{background:`${CY}22`,border:`1px solid ${CY}44`,color:CY,borderRadius:6,padding:'4px 8px',fontSize:11,cursor:'pointer',whiteSpace:'nowrap',fontFamily:'JetBrains Mono,monospace'}}>Copy</button>
+
+              {error && (
+                <div style={{
+                  background: 'rgba(255,50,50,.08)',
+                  border: '1px solid rgba(255,80,80,.3)',
+                  borderRadius: 12, padding: '14px 16px', marginBottom: 20, textAlign: 'left',
+                }}>
+                  <div style={{ fontSize: 13, color: '#ff8080', lineHeight: 1.6, marginBottom: 10 }}>⚠ {error}</div>
+                  {error.includes('Redirect URI') && (
+                    <div style={{ background: 'rgba(0,0,0,.3)', borderRadius: 8, padding: '10px 12px' }}>
+                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,.3)', fontFamily: 'JetBrains Mono, monospace', marginBottom: 6 }}>
+                        LÄGG TILL DENNA URI I SPOTIFY DASHBOARD:
                       </div>
-                      <div style={{fontSize:11,color:'rgba(255,255,255,.3)',marginTop:8,lineHeight:1.5}}>
-                        Go to <span style={{color:G}}>developer.spotify.com/dashboard</span> → your app → Edit → Redirect URIs → paste above → Save
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <code style={{ fontSize: 12, color: CY, fontFamily: 'JetBrains Mono, monospace', wordBreak: 'break-all', flex: 1 }}>
+                          {REDIRECT_URI}
+                        </code>
+                        <button
+                          onClick={() => navigator.clipboard.writeText(REDIRECT_URI)}
+                          style={{
+                            background: `${CY}22`, border: `1px solid ${CY}44`,
+                            color: CY, borderRadius: 6, padding: '4px 8px',
+                            fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap',
+                            fontFamily: 'JetBrains Mono, monospace',
+                          }}
+                        >
+                          Kopiera
+                        </button>
+                      </div>
+                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,.3)', marginTop: 8, lineHeight: 1.5 }}>
+                        Gå till <span style={{ color: G }}>developer.spotify.com/dashboard</span> → din app → Edit → Redirect URIs → klistra in → Save
                       </div>
                     </div>
                   )}
                 </div>
               )}
-              <button onClick={onLogin} disabled={loading} style={{
-                width:'100%',padding:'14px 0',borderRadius:12,border:'none',
-                background:loading?'rgba(29,185,84,.25)':G, color:loading?G:'#000',
-                fontSize:15,fontWeight:700,cursor:loading?'default':'pointer',
-                fontFamily:'Syne,sans-serif',letterSpacing:'.02em',transition:'all .2s',
-                display:'flex',alignItems:'center',justifyContent:'center',gap:10}}>
+
+              <button
+                onClick={onLogin}
+                disabled={loading}
+                style={{
+                  width: '100%', padding: '14px 0', borderRadius: 12, border: 'none',
+                  background: loading ? 'rgba(29,185,84,.25)' : G,
+                  color: loading ? G : '#000',
+                  fontSize: 15, fontWeight: 700,
+                  cursor: loading ? 'default' : 'pointer',
+                  fontFamily: 'Syne, sans-serif',
+                  letterSpacing: '.02em', transition: 'all .2s',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                }}
+              >
                 {loading
-                  ? <span style={{display:'inline-block',animation:'spin 1s linear infinite',fontSize:20}}>⟳</span>
-                  : <><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  ? <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite', fontSize: 20 }}>⟳</span>
+                  : <>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
-                    </svg>Log in with Spotify</>}
+                    </svg>
+                    Logga in med Spotify
+                  </>
+                }
               </button>
-              <div style={{marginTop:14,background:'rgba(0,0,0,.25)',borderRadius:8,padding:'10px 12px',textAlign:'left'}}>
-                <div style={{fontSize:10,color:'rgba(255,255,255,.25)',fontFamily:'JetBrains Mono,monospace',marginBottom:4}}>ACTIVE REDIRECT URI (add this to Spotify Dashboard)</div>
-                <div style={{display:'flex',alignItems:'center',gap:6}}>
-                  <code style={{fontSize:11,color:'rgba(255,255,255,.45)',fontFamily:'JetBrains Mono,monospace',wordBreak:'break-all',flex:1}}>{REDIRECT_URI}</code>
-                  <button onClick={()=>navigator.clipboard.writeText(REDIRECT_URI)} style={{background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.12)',color:'rgba(255,255,255,.4)',borderRadius:5,padding:'3px 7px',fontSize:10,cursor:'pointer',whiteSpace:'nowrap',fontFamily:'JetBrains Mono,monospace'}}>Copy</button>
+
+              <div style={{ marginTop: 14, background: 'rgba(0,0,0,.25)', borderRadius: 8, padding: '10px 12px', textAlign: 'left' }}>
+                <div style={{ fontSize: 10, color: 'rgba(255,255,255,.25)', fontFamily: 'JetBrains Mono, monospace', marginBottom: 4 }}>
+                  AKTIV REDIRECT URI (klistra in i Spotify Dashboard)
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <code style={{ fontSize: 11, color: 'rgba(255,255,255,.45)', fontFamily: 'JetBrains Mono, monospace', wordBreak: 'break-all', flex: 1 }}>
+                    {REDIRECT_URI}
+                  </code>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(REDIRECT_URI)}
+                    style={{
+                      background: 'rgba(255,255,255,.07)', border: '1px solid rgba(255,255,255,.12)',
+                      color: 'rgba(255,255,255,.4)', borderRadius: 5, padding: '3px 7px',
+                      fontSize: 10, cursor: 'pointer', whiteSpace: 'nowrap',
+                      fontFamily: 'JetBrains Mono, monospace',
+                    }}
+                  >
+                    Kopiera
+                  </button>
                 </div>
               </div>
             </div>
@@ -518,219 +751,348 @@
       );
     }
 
-    /* ═══════════════════════════════════════════════════
-       LOADING
-       ═══════════════════════════════════════════════════ */
-    function Loading({status}) {
+    function Loading({ status }) {
       return (
-        <div style={{minHeight:'100vh',background:'#05040A',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:18}}>
-          <div style={{fontSize:36,animation:'spin 1.2s linear infinite',color:G}}>⟳</div>
-          <div style={{color:'rgba(255,255,255,.45)',fontSize:14,fontFamily:'JetBrains Mono,monospace'}}>{status}</div>
+        <div style={{
+          minHeight: '100vh', background: '#05040A',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexDirection: 'column', gap: 18,
+        }}>
+          <div style={{ fontSize: 36, animation: 'spin 1.2s linear infinite', color: G }}>⟳</div>
+          <div style={{ color: 'rgba(255,255,255,.45)', fontSize: 14, fontFamily: 'JetBrains Mono, monospace' }}>{status}</div>
         </div>
       );
     }
 
-    /* ═══════════════════════════════════════════════════
-       DASHBOARD
-       ═══════════════════════════════════════════════════ */
-    function Dashboard({data,onLogout}) {
-      const [tab,setTab]=useState('overview');
-      const {me,topTracks,topArtists,recent}=data;
+    function Dashboard({ data, onLogout }) {
+      const [tab, setTab] = useState('overview');
+      const { me, topTracks, topArtists, recent } = data;
 
-      const ms       = mainstream(topArtists);
-      const moodObj  = mood(topArtists, ms);
-      const radar    = radarData(topArtists, ms);
-      const genres   = genreData(topArtists);
-      const trend    = trendData(recent.items||[]);
-      const stats    = funStats(topTracks,topArtists,ms);
-      const pText    = personality(moodObj,ms);
-      const tgs      = tags(moodObj,ms);
-
-      const rows = (topTracks.items||[]).slice(0,15).map(t=>({...t}));
-      const COLS = [G,PU,CY,OR,PK];
-
-      // FIX: single declaration of displayName (was duplicated, causing syntax error)
+      const ms = getMainstream(topArtists);
+      const moodObj = calcMood(topArtists, ms);
+      const radarPoints = getRadarData(topArtists, ms);
+      const genres = getGenreData(topArtists);
+      const trend = getTrendData(recent.items || []);
+      const stats = getFunStats(topTracks, topArtists, ms);
+      const personalityText = getPersonalityText(moodObj, ms);
+      const personalityTags = getTags(moodObj, ms);
+      const topTrackRows = (topTracks.items || []).slice(0, 15);
+      const PALETTE = [G, PU, CY, OR, PK];
       const displayName = me.display_name || me.id || '?';
 
       return (
-        <div style={{minHeight:'100vh',background:'#05040A',color:'white',fontFamily:'Syne,sans-serif'}}>
-          <div style={{position:'fixed',top:-80,right:-80,width:600,height:600,borderRadius:'50%',background:`radial-gradient(circle,${PU}0B 0%,transparent 70%)`,pointerEvents:'none',zIndex:0}}/>
-          <div style={{position:'fixed',bottom:-80,left:-80,width:500,height:500,borderRadius:'50%',background:`radial-gradient(circle,${G}09 0%,transparent 70%)`,pointerEvents:'none',zIndex:0}}/>
+        <div style={{ minHeight: '100vh', background: '#05040A', color: 'white', fontFamily: 'Syne, sans-serif' }}>
+          {/* subtil bakgrundsbelysning */}
+          <div style={{
+            position: 'fixed', top: -80, right: -80, width: 600, height: 600,
+            borderRadius: '50%', background: `radial-gradient(circle,${PU}0B 0%,transparent 70%)`,
+            pointerEvents: 'none', zIndex: 0,
+          }} />
+          <div style={{
+            position: 'fixed', bottom: -80, left: -80, width: 500, height: 500,
+            borderRadius: '50%', background: `radial-gradient(circle,${G}09 0%,transparent 70%)`,
+            pointerEvents: 'none', zIndex: 0,
+          }} />
 
-          <div style={{position:'relative',zIndex:1,maxWidth:900,margin:'0 auto',padding:'0 20px 60px'}}>
+          <div style={{ position: 'relative', zIndex: 1, maxWidth: 900, margin: '0 auto', padding: '0 20px 60px' }}>
 
-            {/* NAV */}
-            <nav style={{display:'flex',alignItems:'center',justifyContent:'space-between',
-              padding:'18px 0',borderBottom:'1px solid rgba(255,255,255,.06)',marginBottom:32,
-              position:'sticky',top:0,background:'rgba(5,4,10,.92)',backdropFilter:'blur(16px)',zIndex:10}}>
-              <div style={{display:'flex',alignItems:'center',gap:10}}>
-                <span style={{fontSize:22,fontWeight:800,letterSpacing:'-1px',background:`linear-gradient(135deg,${G},${CY})`,WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>Moodify</span>
-                <span style={{background:`${G}22`,color:G,fontSize:10,padding:'2px 8px',borderRadius:20,fontFamily:'JetBrains Mono,monospace'}}>BETA</span>
+            <nav style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '18px 0', borderBottom: '1px solid rgba(255,255,255,.06)', marginBottom: 32,
+              position: 'sticky', top: 0,
+              background: 'rgba(5,4,10,.92)', backdropFilter: 'blur(16px)', zIndex: 10,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{
+                  fontSize: 22, fontWeight: 800, letterSpacing: '-1px',
+                  background: `linear-gradient(135deg,${G},${CY})`,
+                  WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                }}>
+                  Moodify
+                </span>
+                <span style={{
+                  background: `${G}22`, color: G, fontSize: 10,
+                  padding: '2px 8px', borderRadius: 20,
+                  fontFamily: 'JetBrains Mono, monospace',
+                }}>
+                  BETA
+                </span>
               </div>
-              <div style={{display:'flex',gap:4}}>
-                {['overview','tracks','stats','social'].map(t=>(
-                  <button key={t} onClick={()=>setTab(t)} style={{
-                    padding:'7px 13px',borderRadius:8,border:'none',
-                    background:tab===t?'rgba(255,255,255,.1)':'transparent',
-                    color:tab===t?'white':'rgba(255,255,255,.35)',
-                    fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:'Syne,sans-serif',
-                    textTransform:'capitalize',transition:'all .15s'}}>
+
+              <div style={{ display: 'flex', gap: 4 }}>
+                {['overview', 'tracks', 'stats', 'social'].map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setTab(t)}
+                    style={{
+                      padding: '7px 13px', borderRadius: 8, border: 'none',
+                      background: tab === t ? 'rgba(255,255,255,.1)' : 'transparent',
+                      color: tab === t ? 'white' : 'rgba(255,255,255,.35)',
+                      fontSize: 13, fontWeight: 500, cursor: 'pointer',
+                      fontFamily: 'Syne, sans-serif',
+                      textTransform: 'capitalize', transition: 'all .15s',
+                    }}
+                  >
                     {t}
                   </button>
                 ))}
               </div>
-              <div style={{display:'flex',alignItems:'center',gap:10}}>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 {me.images?.[0]?.url
-                  ? <img src={me.images[0].url} style={{width:32,height:32,borderRadius:'50%',objectFit:'cover'}} alt=""/>
-                  : <div style={{width:32,height:32,borderRadius:'50%',background:`linear-gradient(135deg,${G},${CY})`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:800,color:'#000'}}>{displayName[0].toUpperCase()}</div>}
-                <span style={{fontSize:13,color:'rgba(255,255,255,.55)',maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{displayName}</span>
-                <button onClick={onLogout} style={{background:'none',border:'1px solid rgba(255,255,255,.12)',color:'rgba(255,255,255,.4)',borderRadius:8,padding:'5px 11px',fontSize:12,cursor:'pointer',fontFamily:'JetBrains Mono,monospace'}}>logout</button>
+                  ? <img src={me.images[0].url} style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover' }} alt="" />
+                  : <div style={{
+                    width: 32, height: 32, borderRadius: '50%',
+                    background: `linear-gradient(135deg,${G},${CY})`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 13, fontWeight: 800, color: '#000',
+                  }}>
+                    {displayName[0].toUpperCase()}
+                  </div>
+                }
+                <span style={{
+                  fontSize: 13, color: 'rgba(255,255,255,.55)',
+                  maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {displayName}
+                </span>
+                <button
+                  onClick={onLogout}
+                  style={{
+                    background: 'none', border: '1px solid rgba(255,255,255,.12)',
+                    color: 'rgba(255,255,255,.4)', borderRadius: 8,
+                    padding: '5px 11px', fontSize: 12, cursor: 'pointer',
+                    fontFamily: 'JetBrains Mono, monospace',
+                  }}
+                >
+                  logout
+                </button>
               </div>
             </nav>
 
             {/* OVERVIEW */}
-            {tab==='overview'&&<>
-              <div className="fi" style={{background:'linear-gradient(135deg,rgba(176,38,255,.13),rgba(0,217,245,.06))',border:'1px solid rgba(176,38,255,.28)',borderRadius:20,padding:'28px 32px',marginBottom:32,backdropFilter:'blur(12px)',position:'relative',overflow:'hidden'}}>
-                <div style={{position:'absolute',top:-10,right:-10,fontSize:130,opacity:.04,lineHeight:1}}>🧠</div>
-                <div style={{fontSize:11,color:PU,fontFamily:'JetBrains Mono,monospace',letterSpacing:'.12em',marginBottom:10}}>AI MUSIC PERSONALITY</div>
-                <p style={{fontSize:17,lineHeight:1.7,color:'rgba(255,255,255,.85)',margin:0,maxWidth:680}}>{pText}</p>
-                <div style={{display:'flex',gap:8,marginTop:16,flexWrap:'wrap'}}>
-                  {tgs.map(t=><span key={t} style={{background:'rgba(176,38,255,.12)',border:'1px solid rgba(176,38,255,.22)',color:`${PU}CC`,padding:'4px 12px',borderRadius:20,fontSize:12,fontFamily:'JetBrains Mono,monospace'}}>{t}</span>)}
+            {tab === 'overview' && <>
+              <div className="fi" style={{
+                background: 'linear-gradient(135deg,rgba(176,38,255,.13),rgba(0,217,245,.06))',
+                border: '1px solid rgba(176,38,255,.28)',
+                borderRadius: 20, padding: '28px 32px', marginBottom: 32,
+                backdropFilter: 'blur(12px)', position: 'relative', overflow: 'hidden',
+              }}>
+                <div style={{ position: 'absolute', top: -10, right: -10, fontSize: 130, opacity: 0.04, lineHeight: 1 }}>🧠</div>
+                <div style={{ fontSize: 11, color: PU, fontFamily: 'JetBrains Mono, monospace', letterSpacing: '.12em', marginBottom: 10 }}>
+                  AI MUSIKPERSONLIGHET
+                </div>
+                <p style={{ fontSize: 17, lineHeight: 1.7, color: 'rgba(255,255,255,.85)', margin: 0, maxWidth: 680 }}>
+                  {personalityText}
+                </p>
+                <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
+                  {personalityTags.map(tag => (
+                    <span key={tag} style={{
+                      background: 'rgba(176,38,255,.12)',
+                      border: '1px solid rgba(176,38,255,.22)',
+                      color: `${PU}CC`, padding: '4px 12px',
+                      borderRadius: 20, fontSize: 12,
+                      fontFamily: 'JetBrains Mono, monospace',
+                    }}>
+                      {tag}
+                    </span>
+                  ))}
                 </div>
               </div>
 
-              <Section title="Mood Profile · Genre-based analysis">
-                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(110px,1fr))',gap:12}}>
-                  {MOOD_META.map((m,i)=><MoodCard key={m.key} item={m} idx={i} value={moodObj[m.key]}/>)}
+              <Section title="Mood-profil · Genre-baserad analys">
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(110px,1fr))', gap: 12 }}>
+                  {MOOD_ITEMS.map((item, i) => (
+                    <MoodCard key={item.key} item={item} idx={i} value={moodObj[item.key]} />
+                  ))}
                 </div>
               </Section>
 
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20,marginBottom:32}}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 32 }}>
                 <GlassCard>
-                  <div style={{fontSize:11,color:'rgba(255,255,255,.35)',fontFamily:'JetBrains Mono,monospace',letterSpacing:'.1em',marginBottom:12}}>MUSIC PERSONALITY RADAR</div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,.35)', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '.1em', marginBottom: 12 }}>
+                    MUSIKPERSONLIGHET RADAR
+                  </div>
                   <ResponsiveContainer width="100%" height={220}>
-                    <RadarChart data={radar}>
-                      <PolarGrid stroke="rgba(255,255,255,.07)"/>
-                      <PolarAngleAxis dataKey="s" tick={{fill:'rgba(255,255,255,.4)',fontSize:11,fontFamily:'JetBrains Mono,monospace'}}/>
-                      <Radar dataKey="A" stroke={CY} fill={CY} fillOpacity={.13} strokeWidth={2}/>
+                    <RadarChart data={radarPoints}>
+                      <PolarGrid stroke="rgba(255,255,255,.07)" />
+                      <PolarAngleAxis dataKey="s" tick={{ fill: 'rgba(255,255,255,.4)', fontSize: 11, fontFamily: 'JetBrains Mono, monospace' }} />
+                      <Radar dataKey="A" stroke={CY} fill={CY} fillOpacity={0.13} strokeWidth={2} />
                     </RadarChart>
                   </ResponsiveContainer>
                 </GlassCard>
 
                 <GlassCard>
-                  <div style={{fontSize:11,color:'rgba(255,255,255,.35)',fontFamily:'JetBrains Mono,monospace',letterSpacing:'.1em',marginBottom:12}}>GENRE DISTRIBUTION</div>
-                  {genres.length
-                    ? <div style={{display:'flex',gap:12,alignItems:'center'}}>
-                        <PieChart width={140} height={140}>
-                          <Pie data={genres} dataKey="value" cx={65} cy={65} innerRadius={38} outerRadius={60} strokeWidth={0}>
-                            {genres.map((g,i)=><Cell key={i} fill={g.color}/>)}
-                          </Pie>
-                        </PieChart>
-                        <div style={{flex:1,display:'flex',flexDirection:'column',gap:7}}>
-                          {genres.map(g=>(
-                            <div key={g.name} style={{display:'flex',alignItems:'center',gap:8}}>
-                              <div style={{width:8,height:8,borderRadius:'50%',background:g.color,flexShrink:0}}/>
-                              <span style={{fontSize:12,color:'rgba(255,255,255,.6)',flex:1}}>{g.name}</span>
-                              <span style={{fontSize:12,fontFamily:'JetBrains Mono,monospace',color:g.color}}>{g.value}%</span>
-                            </div>
-                          ))}
-                        </div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,.35)', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '.1em', marginBottom: 12 }}>
+                    GENRE-FÖRDELNING
+                  </div>
+                  {genres.length ? (
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                      <PieChart width={140} height={140}>
+                        <Pie data={genres} dataKey="value" cx={65} cy={65} innerRadius={38} outerRadius={60} strokeWidth={0}>
+                          {genres.map((g, i) => <Cell key={i} fill={g.color} />)}
+                        </Pie>
+                      </PieChart>
+                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 7 }}>
+                        {genres.map(g => (
+                          <div key={g.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ width: 8, height: 8, borderRadius: '50%', background: g.color, flexShrink: 0 }} />
+                            <span style={{ fontSize: 12, color: 'rgba(255,255,255,.6)', flex: 1 }}>{g.name}</span>
+                            <span style={{ fontSize: 12, fontFamily: 'JetBrains Mono, monospace', color: g.color }}>{g.value}%</span>
+                          </div>
+                        ))}
                       </div>
-                    : <div style={{color:'rgba(255,255,255,.3)',fontSize:13,paddingTop:20}}>Not enough genre data</div>}
+                    </div>
+                  ) : (
+                    <div style={{ color: 'rgba(255,255,255,.3)', fontSize: 13, paddingTop: 20 }}>Inte tillräckligt med genredata</div>
+                  )}
                 </GlassCard>
               </div>
 
-              {trend.length>1&&<Section title="Mood trend · recent days">
-                <GlassCard>
-                  <div style={{display:'flex',gap:20,marginBottom:16}}>
-                    {[{l:'Energy',c:OR},{l:'Happiness',c:G}].map(s=>(
-                      <div key={s.l} style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:'rgba(255,255,255,.5)'}}>
-                        <div style={{width:24,height:2,borderRadius:2,background:s.c}}/>{s.l}
-                      </div>
-                    ))}
-                  </div>
-                  <ResponsiveContainer width="100%" height={160}>
-                    <AreaChart data={trend}>
-                      <defs>
-                        <linearGradient id="ge" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%"  stopColor={OR} stopOpacity={.2}/>
-                          <stop offset="95%" stopColor={OR} stopOpacity={0}/>
-                        </linearGradient>
-                        <linearGradient id="gh" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%"  stopColor={G}  stopOpacity={.2}/>
-                          <stop offset="95%" stopColor={G}  stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <XAxis dataKey="day" tick={{fill:'rgba(255,255,255,.3)',fontSize:11}} axisLine={false} tickLine={false}/>
-                      <YAxis hide domain={[0,100]}/>
-                      <Tooltip content={<Tip/>}/>
-                      <Area type="monotone" dataKey="energy"    stroke={OR} fill="url(#ge)" strokeWidth={2} name="Energy"    dot={false}/>
-                      <Area type="monotone" dataKey="happiness" stroke={G}  fill="url(#gh)" strokeWidth={2} name="Happiness" dot={false}/>
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </GlassCard>
-              </Section>}
+              {trend.length > 1 && (
+                <Section title="Mood trend · senaste dagarna">
+                  <GlassCard>
+                    <div style={{ display: 'flex', gap: 20, marginBottom: 16 }}>
+                      {[{ l: 'Energy', c: OR }, { l: 'Happiness', c: G }].map(s => (
+                        <div key={s.l} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'rgba(255,255,255,.5)' }}>
+                          <div style={{ width: 24, height: 2, borderRadius: 2, background: s.c }} />
+                          {s.l}
+                        </div>
+                      ))}
+                    </div>
+                    <ResponsiveContainer width="100%" height={160}>
+                      <AreaChart data={trend}>
+                        <defs>
+                          <linearGradient id="ge" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%"  stopColor={OR} stopOpacity={0.2} />
+                            <stop offset="95%" stopColor={OR} stopOpacity={0} />
+                          </linearGradient>
+                          <linearGradient id="gh" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%"  stopColor={G} stopOpacity={0.2} />
+                            <stop offset="95%" stopColor={G} stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <XAxis dataKey="day" tick={{ fill: 'rgba(255,255,255,.3)', fontSize: 11 }} axisLine={false} tickLine={false} />
+                        <YAxis hide domain={[0, 100]} />
+                        <Tooltip content={<ChartTooltip />} />
+                        <Area type="monotone" dataKey="energy"    stroke={OR} fill="url(#ge)" strokeWidth={2} name="Energy"    dot={false} />
+                        <Area type="monotone" dataKey="happiness" stroke={G}  fill="url(#gh)" strokeWidth={2} name="Happiness" dot={false} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </GlassCard>
+                </Section>
+              )}
             </>}
 
             {/* TRACKS */}
-            {tab==='tracks'&&<Section title={`Top tracks · ${topTracks.items?.length||0} songs`}>
-              <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                {rows.map((t,i)=>{
-                  const en=Math.round(40+(t.popularity||50)*.55);
-                  const va=(t.popularity||50)/100;
-                  const ms2=t.duration_ms||0;
-                  const dur=ms2?`${Math.floor(ms2/60000)}:${String(Math.floor((ms2%60000)/1000)).padStart(2,'0')}`:'—';
-                  return (
-                    <div key={t.id} className="fi" style={{background:'rgba(255,255,255,.03)',border:'1px solid rgba(255,255,255,.07)',
-                      borderRadius:14,padding:'14px 18px',display:'flex',alignItems:'center',gap:14,
-                      backdropFilter:'blur(12px)',transition:'border-color .2s,background .2s',cursor:'default',
-                      animationDelay:`${i*.04}s`}}
-                      onMouseEnter={e=>{e.currentTarget.style.background='rgba(255,255,255,.05)';e.currentTarget.style.borderColor='rgba(29,185,84,.2)';}}
-                      onMouseLeave={e=>{e.currentTarget.style.background='rgba(255,255,255,.03)';e.currentTarget.style.borderColor='rgba(255,255,255,.07)';}}>
-                      <span style={{fontSize:12,fontFamily:'JetBrains Mono,monospace',color:'rgba(255,255,255,.2)',width:18,textAlign:'center',flexShrink:0}}>{i+1}</span>
-                      {t.album?.images?.[0]?.url
-                        ? <img src={t.album.images[0].url} style={{width:40,height:40,borderRadius:8,objectFit:'cover',flexShrink:0}} alt=""/>
-                        : <div style={{width:40,height:40,borderRadius:8,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,background:`linear-gradient(135deg,${COLS[i%5]}33,${COLS[(i+1)%5]}22)`}}>♪</div>}
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:14,fontWeight:600,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.name}</div>
-                        <div style={{fontSize:12,color:'rgba(255,255,255,.4)',marginTop:2}}>{(t.artists||[]).map(a=>a.name).join(', ')}</div>
+            {tab === 'tracks' && (
+              <Section title={`Top tracks · ${topTracks.items?.length || 0} låtar`}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {topTrackRows.map((track, i) => {
+                    const energy = Math.round(40 + (track.popularity || 50) * 0.55);
+                    const val = (track.popularity || 50) / 100;
+                    const ms2 = track.duration_ms || 0;
+                    const dur = ms2
+                      ? `${Math.floor(ms2 / 60000)}:${String(Math.floor((ms2 % 60000) / 1000)).padStart(2, '0')}`
+                      : '—';
+                    return (
+                      <div
+                        key={track.id}
+                        className="fi"
+                        style={{
+                          background: 'rgba(255,255,255,.03)',
+                          border: '1px solid rgba(255,255,255,.07)',
+                          borderRadius: 14, padding: '14px 18px',
+                          display: 'flex', alignItems: 'center', gap: 14,
+                          backdropFilter: 'blur(12px)', transition: 'border-color .2s,background .2s',
+                          cursor: 'default', animationDelay: `${i * 0.04}s`,
+                        }}
+                        onMouseEnter={e => {
+                          e.currentTarget.style.background = 'rgba(255,255,255,.05)';
+                          e.currentTarget.style.borderColor = 'rgba(29,185,84,.2)';
+                        }}
+                        onMouseLeave={e => {
+                          e.currentTarget.style.background = 'rgba(255,255,255,.03)';
+                          e.currentTarget.style.borderColor = 'rgba(255,255,255,.07)';
+                        }}
+                      >
+                        <span style={{ fontSize: 12, fontFamily: 'JetBrains Mono, monospace', color: 'rgba(255,255,255,.2)', width: 18, textAlign: 'center', flexShrink: 0 }}>
+                          {i + 1}
+                        </span>
+                        {track.album?.images?.[0]?.url
+                          ? <img src={track.album.images[0].url} style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} alt="" />
+                          : <div style={{
+                            width: 40, height: 40, borderRadius: 8, flexShrink: 0,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
+                            background: `linear-gradient(135deg,${PALETTE[i % 5]}33,${PALETTE[(i + 1) % 5]}22)`,
+                          }}>♪</div>
+                        }
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {track.name}
+                          </div>
+                          <div style={{ fontSize: 12, color: 'rgba(255,255,255,.4)', marginTop: 2 }}>
+                            {(track.artists || []).map(a => a.name).join(', ')}
+                          </div>
+                        </div>
+                        <Wave energy={energy} />
+                        <div style={{ textAlign: 'right', minWidth: 72, flexShrink: 0 }}>
+                          <div style={{ fontSize: 12, fontFamily: 'JetBrains Mono, monospace', color: OR }}>⚡ {energy}</div>
+                          <div style={{ fontSize: 11, color: 'rgba(255,255,255,.3)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>{dur}</div>
+                        </div>
+                        <div style={{ width: 40, height: 5, borderRadius: 3, background: 'rgba(255,255,255,.07)', overflow: 'hidden', flexShrink: 0 }}>
+                          <div style={{ height: '100%', width: `${val * 100}%`, background: `linear-gradient(90deg,${PK},${G})`, borderRadius: 3 }} />
+                        </div>
                       </div>
-                      <Wave energy={en}/>
-                      <div style={{textAlign:'right',minWidth:72,flexShrink:0}}>
-                        <div style={{fontSize:12,fontFamily:'JetBrains Mono,monospace',color:OR}}>⚡ {en}</div>
-                        <div style={{fontSize:11,color:'rgba(255,255,255,.3)',marginTop:2,fontFamily:'JetBrains Mono,monospace'}}>{dur}</div>
-                      </div>
-                      <div style={{width:40,height:5,borderRadius:3,background:'rgba(255,255,255,.07)',overflow:'hidden',flexShrink:0}}>
-                        <div style={{height:'100%',width:`${va*100}%`,background:`linear-gradient(90deg,${PK},${G})`,borderRadius:3}}/>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </Section>}
+                    );
+                  })}
+                </div>
+              </Section>
+            )}
 
             {/* STATS */}
-            {tab==='stats'&&<>
+            {tab === 'stats' && <>
               <Section title="Fun Stats">
-                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:14}}>
-                  {stats.map(s=>(
-                    <div key={s.label} className="fi" style={{background:'rgba(255,255,255,.03)',border:`1px solid ${s.color}22`,borderRadius:16,padding:'20px 22px',backdropFilter:'blur(12px)'}}>
-                      <div style={{fontSize:11,color:'rgba(255,255,255,.3)',fontFamily:'JetBrains Mono,monospace',letterSpacing:'.1em',marginBottom:8}}>{s.label.toUpperCase()}</div>
-                      <div style={{fontSize:20,fontWeight:700,color:s.color,marginBottom:4,wordBreak:'break-word'}}>{s.value}</div>
-                      <div style={{fontSize:12,color:'rgba(255,255,255,.35)'}}>{s.sub}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: 14 }}>
+                  {stats.map(s => (
+                    <div key={s.label} className="fi" style={{
+                      background: 'rgba(255,255,255,.03)',
+                      border: `1px solid ${s.color}22`,
+                      borderRadius: 16, padding: '20px 22px', backdropFilter: 'blur(12px)',
+                    }}>
+                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,.3)', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '.1em', marginBottom: 8 }}>
+                        {s.label.toUpperCase()}
+                      </div>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: s.color, marginBottom: 4, wordBreak: 'break-word' }}>{s.value}</div>
+                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,.35)' }}>{s.sub}</div>
                     </div>
                   ))}
                 </div>
               </Section>
-              <Section title={`Top Artists · ${topArtists.items?.length||0}`}>
-                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:12}}>
-                  {(topArtists.items||[]).slice(0,12).map((a,i)=>(
-                    <div key={a.id} className="fi" style={{background:'rgba(255,255,255,.03)',border:'1px solid rgba(255,255,255,.07)',borderRadius:14,padding:16,textAlign:'center',backdropFilter:'blur(12px)',animationDelay:`${i*.04}s`}}>
-                      {a.images?.[0]?.url
-                        ? <img src={a.images[0].url} style={{width:56,height:56,borderRadius:'50%',objectFit:'cover',marginBottom:10}} alt=""/>
-                        : <div style={{width:56,height:56,borderRadius:'50%',background:`linear-gradient(135deg,${COLS[i%5]}44,${COLS[(i+1)%5]}22)`,margin:'0 auto 10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:22}}>🎤</div>}
-                      <div style={{fontSize:13,fontWeight:600,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{a.name}</div>
-                      <div style={{fontSize:11,color:'rgba(255,255,255,.35)',marginTop:4,fontFamily:'JetBrains Mono,monospace'}}>{a.popularity}% pop.</div>
+
+              <Section title={`Top Artists · ${topArtists.items?.length || 0}`}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 12 }}>
+                  {(topArtists.items || []).slice(0, 12).map((artist, i) => (
+                    <div key={artist.id} className="fi" style={{
+                      background: 'rgba(255,255,255,.03)',
+                      border: '1px solid rgba(255,255,255,.07)',
+                      borderRadius: 14, padding: 16, textAlign: 'center',
+                      backdropFilter: 'blur(12px)', animationDelay: `${i * 0.04}s`,
+                    }}>
+                      {artist.images?.[0]?.url
+                        ? <img src={artist.images[0].url} style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover', marginBottom: 10 }} alt="" />
+                        : <div style={{
+                          width: 56, height: 56, borderRadius: '50%',
+                          background: `linear-gradient(135deg,${PALETTE[i % 5]}44,${PALETTE[(i + 1) % 5]}22)`,
+                          margin: '0 auto 10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22,
+                        }}>🎤</div>
+                      }
+                      <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {artist.name}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,.35)', marginTop: 4, fontFamily: 'JetBrains Mono, monospace' }}>
+                        {artist.popularity}% pop.
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -738,88 +1100,159 @@
             </>}
 
             {/* SOCIAL */}
-            {tab==='social'&&<Section title="Social Match">
-              <GlassCard style={{textAlign:'center',marginBottom:20}}>
-                <div style={{fontSize:60,marginBottom:16}}>🎭</div>
-                <div style={{fontSize:13,color:'rgba(255,255,255,.35)',fontFamily:'JetBrains Mono,monospace',letterSpacing:'.1em',marginBottom:20}}>YOUR CLOSEST MATCH</div>
-                <div style={{display:'inline-block',background:`linear-gradient(135deg,${PU}22,${CY}22)`,border:`1px solid ${PU}44`,borderRadius:16,padding:'16px 32px',marginBottom:20}}>
-                  <div style={{fontSize:42,fontWeight:800}}>{moodObj.energy>70&&ms<50?'87%':moodObj.chill>60?'82%':'79%'}</div>
-                  <div style={{fontSize:15,color:CY,fontFamily:'JetBrains Mono,monospace',marginTop:4}}>
-                    {moodObj.energy>70?'Intensity Listener':moodObj.chill>60?'Ambient Explorer':'Indie Nerd'}
+            {tab === 'social' && (
+              <Section title="Social Match">
+                <GlassCard style={{ textAlign: 'center', marginBottom: 20 }}>
+                  <div style={{ fontSize: 60, marginBottom: 16 }}>🎭</div>
+                  <div style={{ fontSize: 13, color: 'rgba(255,255,255,.35)', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '.1em', marginBottom: 20 }}>
+                    DITT NÄRMASTE MATCH
                   </div>
+                  <div style={{
+                    display: 'inline-block',
+                    background: `linear-gradient(135deg,${PU}22,${CY}22)`,
+                    border: `1px solid ${PU}44`,
+                    borderRadius: 16, padding: '16px 32px', marginBottom: 20,
+                  }}>
+                    <div style={{ fontSize: 42, fontWeight: 800 }}>
+                      {moodObj.energy > 70 && ms < 50 ? '87%' : moodObj.chill > 60 ? '82%' : '79%'}
+                    </div>
+                    <div style={{ fontSize: 15, color: CY, fontFamily: 'JetBrains Mono, monospace', marginTop: 4 }}>
+                      {moodObj.energy > 70 ? 'Intensitets-lyssnare' : moodObj.chill > 60 ? 'Ambient-utforskare' : 'Indie-nörd'}
+                    </div>
+                  </div>
+                  <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 14, lineHeight: 1.7, maxWidth: 500, margin: '0 auto' }}>
+                    Baserat på din musikprofil — {moodObj.happiness}% happiness, {moodObj.energy}% energy, {ms}% mainstream.
+                  </p>
+                </GlassCard>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14 }}>
+                  {[
+                    {
+                      type: moodObj.energy > 65 ? 'Energy Seeker' : 'Calm Explorer',
+                      match: Math.min(98, (moodObj.energy > 65 ? 88 : 78) + Math.round(Math.max(moodObj.energy, moodObj.chill) / 12)),
+                      icon: moodObj.energy > 65 ? '⚡' : '🌊',
+                    },
+                    {
+                      type: ms < 45 ? 'Underground Nerd' : 'Trendsetter',
+                      match: Math.min(98, (ms < 45 ? 85 : 72) + Math.round((ms < 45 ? 100 - ms : ms) / 12)),
+                      icon: ms < 45 ? '🔍' : '📈',
+                    },
+                    {
+                      type: moodObj.focus > 55 ? 'Complexity Lover' : 'Vibe Chaser',
+                      match: Math.min(98, (moodObj.focus > 55 ? 80 : 70) + Math.round(Math.max(moodObj.focus, moodObj.happiness) / 12)),
+                      icon: moodObj.focus > 55 ? '🧩' : '🎉',
+                    },
+                  ].map(m => (
+                    <div key={m.type} style={{
+                      background: 'rgba(255,255,255,.03)',
+                      border: '1px solid rgba(255,255,255,.07)',
+                      borderRadius: 16, padding: 20, textAlign: 'center',
+                      backdropFilter: 'blur(12px)',
+                    }}>
+                      <div style={{ fontSize: 32, marginBottom: 10 }}>{m.icon}</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: G }}>{m.match}%</div>
+                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,.45)', marginTop: 6 }}>{m.type}</div>
+                    </div>
+                  ))}
                 </div>
-                <p style={{color:'rgba(255,255,255,.5)',fontSize:14,lineHeight:1.7,maxWidth:500,margin:'0 auto'}}>
-                  Based on your music profile — {moodObj.happiness}% happiness, {moodObj.energy}% energy, {ms}% mainstream.
-                </p>
-              </GlassCard>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14}}>
-                {[
-                  {type:moodObj.energy>65?'Energy Seeker':'Calm Explorer',    match:Math.min(98,(moodObj.energy>65?88:78)+Math.round(Math.max(moodObj.energy,moodObj.chill)/12)), icon:moodObj.energy>65?'⚡':'🌊'},
-                  {type:ms<45?'Underground Nerd':'Trendsetter',               match:Math.min(98,(ms<45?85:72)+Math.round((ms<45?100-ms:ms)/12)),                                icon:ms<45?'🔍':'📈'},
-                  {type:moodObj.focus>55?'Complexity Lover':'Vibe Chaser',    match:Math.min(98,(moodObj.focus>55?80:70)+Math.round(Math.max(moodObj.focus,moodObj.happiness)/12)),icon:moodObj.focus>55?'🧩':'🎉'},
-                ].map(m=>(
-                  <div key={m.type} style={{background:'rgba(255,255,255,.03)',border:'1px solid rgba(255,255,255,.07)',borderRadius:16,padding:20,textAlign:'center',backdropFilter:'blur(12px)'}}>
-                    <div style={{fontSize:32,marginBottom:10}}>{m.icon}</div>
-                    <div style={{fontSize:20,fontWeight:700,color:G}}>{m.match}%</div>
-                    <div style={{fontSize:12,color:'rgba(255,255,255,.45)',marginTop:6}}>{m.type}</div>
-                  </div>
-                ))}
-              </div>
-            </Section>}
+              </Section>
+            )}
 
           </div>
         </div>
       );
     }
 
-    /* ═══════════════════════════════════════════════════
-       APP ROOT
-       ═══════════════════════════════════════════════════ */
     function App() {
-      const [phase,  setPhase]  = useState('init');
-      const [data,   setData]   = useState(null);
-      const [error,  setError]  = useState('');
-      const [status, setStatus] = useState('Loading...');
-      const [ll,     setLL]     = useState(false);
+      const [phase, setPhase] = useState('init');
+      const [data, setData] = useState(null);
+      const [error, setError] = useState('');
+      const [status, setStatus] = useState('Laddar...');
+      const [loginLoading, setLoginLoading] = useState(false);
+      const [timeRange, setTimeRange] = useState('medium_term');
+      const [recentH, setRecentH] = useState(null);
+      const tokenRef = useRef(null);
 
-      const logout = () => { clearAuth(); setData(null); setError(''); setPhase('login'); };
+      const logout = () => {
+        clearAuth();
+        setData(null);
+        setError('');
+        setPhase('login');
+      };
 
-      const fetch2 = async (token) => {
+      const fetchData = async (token, tr, rh) => {
+        tokenRef.current = token;
         setPhase('loading');
         try {
-          const raw = await loadAll(token, setStatus);
-          setData(raw); setPhase('dashboard');
-        } catch(e) { setError(e.message); setPhase('login'); }
+          const raw = await loadAll(token, setStatus, tr || 'medium_term', rh || null);
+          setData(raw);
+          setPhase('dashboard');
+        } catch (e) {
+          setError(e.message);
+          setPhase('login');
+        }
+      };
+
+      const refetch = async (tr, rh) => {
+        const token = tokenRef.current || await getToken();
+        if (!token) { setPhase('login'); return; }
+        await fetchData(token, tr, rh);
       };
 
       const handleLogin = async () => {
-        if (CLIENT_ID === 'YOUR_CLIENT_ID_HERE') {
-          setError('Open index.html and replace YOUR_CLIENT_ID_HERE with your Spotify Client ID from developer.spotify.com/dashboard');
+        if (CLIENT_ID === 'DIN_CLIENT_ID_HÄR') {
+          setError('Öppna index.html och ersätt DIN_CLIENT_ID_HÄR med ditt Spotify Client ID.');
           return;
         }
-        setLL(true);
+        setLoginLoading(true);
         await startLogin();
       };
 
-      useEffect(()=>{
-        const p=new URLSearchParams(window.location.search);
-        const code=p.get('code'), err=p.get('error');
-        if(err){ window.history.replaceState({},'',window.location.pathname); setError('Spotify denied: '+err); setPhase('login'); return; }
-        if(code){
-          window.history.replaceState({},'',window.location.pathname);
-          setPhase('loading'); setStatus('Exchanging code for token...');
-          exchangeCode(code).then(t=>fetch2(t)).catch(e=>{setError(e.message);setPhase('login');});
+      useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get('code');
+        const err = params.get('error');
+
+        if (err) {
+          window.history.replaceState({}, '', window.location.pathname);
+          setError('Spotify nekade inloggning: ' + err);
+          setPhase('login');
           return;
         }
-        getToken().then(t=>{ if(t) fetch2(t); else setPhase('login'); });
-      },[]);
 
-      if(phase==='init'||phase==='loading') return <Loading status={status}/>;
-      if(phase==='dashboard'&&data)         return <Dashboard data={data} onLogout={logout}/>;
-      return <Login onLogin={handleLogin} error={error} loading={ll}/>;
+        if (code) {
+          window.history.replaceState({}, '', window.location.pathname);
+          setPhase('loading');
+          setStatus('Byter kod mot token...');
+          exchangeCode(code)
+            .then(t => fetchData(t, 'medium_term', null))
+            .catch(e => { setError(e.message); setPhase('login'); });
+          return;
+        }
+
+        // kolla om vi redan är inloggade
+        getToken().then(t => {
+          if (t) fetchData(t, 'medium_term', null);
+          else setPhase('login');
+        });
+      }, []);
+
+      if (phase === 'init' || phase === 'loading') return <Loading status={status} />;
+      if (phase === 'dashboard' && data) {
+        return (
+          <Dashboard
+            data={data}
+            onLogout={logout}
+            timeRange={timeRange}
+            recentH={recentH}
+            onTimeChange={(tr, rh) => { setTimeRange(tr); setRecentH(rh); refetch(tr, rh); }}
+          />
+        );
+      }
+      return <Login onLogin={handleLogin} error={error} loading={loginLoading} />;
     }
 
-    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
 </body>
 </html>
